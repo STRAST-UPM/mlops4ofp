@@ -1,0 +1,49 @@
+# =====================================================
+# GITIGNORE PARA MLOPS4OFP — FASES, VARIANTES Y DVC
+# =====================================================
+
+# === ARCHIVOS DE SALIDA GLOBALES NO VERSIONADOS ===
+/outputs/
+/local_dvc_store/
+/local_dvc_store/*
+
+# === DVC CACHE (NUNCA subir estos directorios) ===
+/.dvc/cache/
+/.dvc/tmp/
+
+# === RAW DATA (controlado SOLO por DVC) ===
+data/
+
+# entorno
+.venv/
+__pycache__/
+
+# datasets y salidas
+exports/
+*.parquet
+
+# Archivo raw de pruebas
+data/raw_merged.csv
+data/raw.csv
+
+# === IGNORAR ARTEFACTOS DE VARIANTES ===
+params/*/v*/**/*.parquet
+params/*/v*/**/*.csv
+params/*/v*/**/*.json
+params/*/v*/**/*.html
+params/*/v*/**/figures/
+params/*/v*/**/reports/
+
+# ⚠️ PERMITIR ARCHIVOS .dvc (son ligeros y necesarios)
+!params/*/v*/*.dvc
+
+# === NOTEBOOKS ANTIGUOS ===
+notebooks-old/*
+
+# === ENTORNOS Y ARCHIVOS DEL SISTEMA ===
+#.venv/
+.DS_Store
+.idea/
+#.vscode/*
+*.log
+__pycache__/

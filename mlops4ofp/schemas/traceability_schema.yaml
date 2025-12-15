@@ -1,0 +1,167 @@
+# ============================================================
+# TRACEABILITY SCHEMA — mlops4ofp (versión ampliada variantes)
+# ============================================================
+
+version: "1.1"
+
+metadata:
+  description: "Esquema de trazabilidad para activos generados en el workflow MLOps4OFP con soporte para variantes."
+  compatible_traceability_format: ">=1.0"
+
+fields:
+
+  stage:
+    type: string
+    required: true
+
+  timestamp:
+    type: string
+    required: true
+
+  inputs:
+    type: list
+    required: false
+
+  outputs:
+    type: list
+    required: false
+
+  params:
+    type: dict
+    required: false
+
+  git:
+    type: dict
+    required: false
+
+  variant:
+    type: string
+    required: false
+
+  parent_variant:
+    type: string
+    required: false
+
+
+# ============================================================
+# Reglas por FASE (solo aplican cuando la metadata es de script/notebook,
+# NO se aplican a metadata de variante)
+# ============================================================
+
+# phase_rules:
+#   "01_explore":
+#     required_inputs:
+#       - "data/01-raw"
+#     required_outputs:
+#       - "data/02-interim/01_dataset_explored.parquet"
+#
+#   "02_prepareeventsds":
+#     required_inputs:
+#       - "data/02-interim/01_dataset_explored.parquet"
+#
+#     required_outputs:
+#       - "data/02-interim/02_events_dataset.parquet"
+#       - "outputs/interim/02_events_dataset.parquet"
+#       - "outputs/metadata/02_event_dict.json"
+#       - "outputs/metadata/02_minmax_stats.json"
+#       - "outputs/reports/02_events_summary.html"
+#
+#   "03_preparewindowsds":
+#     required_inputs:
+#       - "params/02_prepareeventsds"   # carpeta de la variante anterior
+#     required_outputs:
+#       - "params/03_preparewindowsds"  # carpeta con los resultados de la fase 03
+
+
+
+# ============================================================
+# REGLAS DE PARÁMETROS POR FASE
+# ============================================================
+
+param_rules:
+
+  "01_explore":
+    raw_dataset_path:
+      type: string
+      required: true
+      
+    cleaning_strategy:
+      type: string
+      enum: ["none", "basic", "full"]
+      required: true
+
+    nan_values:
+      type: list          # validaremos que sea lista
+      element_type: number   # validaremos que todos los elementos sean numéricos
+      required: true
+
+    error_values_by_column:
+      type: dict          # debe ser diccionario
+      required: true
+
+
+  "02_prepareeventsds":
+    band_thresholds_pct:
+      type: list
+      element_type: number
+      required: true
+
+    event_strategy:
+      type: string
+      enum: ["levels", "transitions", "both"]
+      required: true
+
+    nan_handling:
+      type: string
+      enum: ["keep", "discard"]
+      required: true
+
+    parent_variant:
+      type: string
+      required: true
+      regex: "^v[0-9]{3}$"
+
+    Tu:
+      type: number
+      required: false
+
+  "03_preparewindowsds":
+
+    OW:
+      type: number
+      required: true
+
+    LT:
+      type: number
+      required: true
+
+    PW:
+      type: number
+      required: true
+
+    Tu:
+      type: number
+      required: false
+
+    window_strategy:
+      type: string
+      enum: ["synchro", "asynOW", "withinPW", "asynPW"]
+      required: true
+
+    nan_strategy:
+      type: string
+      enum: ["preserve", "discard"]
+      required: true
+
+    variant_id:
+      type: string
+      regex: "^v[0-9]{3}$"
+      required: true
+
+    parent_variant:
+      type: string
+      required: true
+      regex: "^v[0-9]{3}$"
+
+
+  

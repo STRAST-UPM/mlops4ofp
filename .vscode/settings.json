@@ -1,0 +1,49 @@
+{
+    // ===== CONFIGURACIÓN DEL INTÉRPRETE PYTHON =====
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.pythonPath": "${workspaceFolder}/.venv/bin/python",
+
+    // Forzar activación automática del entorno .venv en terminal y notebooks
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+
+    // ===== FORZAR JUPYTER A USAR EL KERNEL DEL .venv =====
+    "jupyter.jupyterServerType": "local",
+    "jupyter.kernels.preferredPythonInterpreter": [
+        "${workspaceFolder}/.venv/bin/python"
+    ],
+
+    // Ocultar todos los kernels que no sean .venv
+    "jupyter.kernels.excludePythonEnvironments": [
+        "/usr/bin/python",
+        "/usr/local/bin/python",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+        "${env:HOME}/.espressif/*",
+        "${env:HOME}/Library/Jupyter/kernels/python3"
+    ],
+
+    // ===== DESACTIVAR AUTO-DETECCIÓN DEL SISTEMA =====
+    "python.experiments.enabled": false,
+    "python.interpreter.infoVisibility": "off",
+    "python.interpreter.scanAllEnvs": false,
+
+    // ===== MEJORAR IMPORTS DEL PROYECTO (mlops4ofp) =====
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}"
+    ],
+
+    // ===== VS CODE NOTEBOOK SETTINGS =====
+    "jupyter.disableJupyterAutoStart": false,
+    "jupyter.askForKernelRestart": false,
+
+    // ===== EVITAR QUE TOMEN ENTORNOS DEL SISTEMA =====
+    "python.venvFolders": [
+        "${workspaceFolder}"
+    ],
+    "python.venvPath": "${workspaceFolder}"
+}
+

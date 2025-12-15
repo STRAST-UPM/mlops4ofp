@@ -1,0 +1,26 @@
+stages:
+  01_explore:
+    cmd: python scripts/01_explore/01_explore.py
+    deps:
+      - scripts/01_explore/01_explore.py
+      - params/01_explore/base_params.yaml
+    
+    #outs_no_cache:
+    #  - data/02-interim/01_dataset_explored.parquet
+    #  - outputs/metadata/01_explore.json
+    #  - outputs/metadata/01_explore_params.json
+    #  - outputs/reports/01_explore/
+    #  - outputs/figures/01_explore/
+
+  02_prepareeventsds:
+    cmd: python scripts/02_prepareeventsds/02_run_prepareeventsds.py
+    deps:
+      - scripts/02_prepareeventsds/02_run_prepareeventsds.py
+      - params/02_prepareeventsds/base_params.yaml
+
+  03_preparewindowsds:
+    cmd: python scripts/03_preparewindowsds/03_preparewindowsds.py
+    deps:
+      - scripts/03_preparewindowsds/03_preparewindowsds.py
+      - params/03_preparewindowsds/base_params.yaml
+

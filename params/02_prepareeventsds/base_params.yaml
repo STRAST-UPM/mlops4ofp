@@ -1,0 +1,8 @@
+# ============================================================
+# Parámetros base para la Fase 02 — PrepareEventsDS
+# ============================================================
+band_thresholds_pct: [40, 60, 90, 95]
+event_strategy: both
+nan_handling: keep
+Tu: null
+

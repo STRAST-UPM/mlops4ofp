@@ -1,0 +1,22 @@
+# ============================================================
+# Parámetros base para la Fase 01 — Explore
+# Estos valores se copian a cada nueva variante.
+# ============================================================
+
+# ------------------------------------------------------------
+# cleaning_strategy define cómo tratar valores inválidos:
+#   "none"      → no limpiar nada
+#   "basic"  → convertir en NaN los valores de nan_values
+#   "full" → usar diccionario error_values_by_column
+cleaning_strategy: none
+
+# Lista global de valores a convertir en NaN (solo para nan-list)
+nan_values:
+  - -999999.0
+
+# Diccionario columna → lista de valores erróneos específicos
+# Solo se usa si cleaning_strategy == "by-column"
+error_values_by_column: {}
+
+# Ruta por defecto del dataset raw que se copiará a data/01-raw/
+raw_dataset_path: ./data/raw.csv

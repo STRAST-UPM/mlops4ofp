@@ -1,0 +1,13 @@
+pandas
+numpy
+matplotlib
+pyyaml
+jupyter
+dvc
+ipykernel
+python-dotenv
+tqdm
+seaborn
+pyarrow
+fastparquet
+
