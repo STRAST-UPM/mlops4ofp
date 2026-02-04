@@ -1,0 +1,23 @@
+# Ejemplo de configuración local para uso en desarrollo
+# Copiar a `setup/local.yaml` y editar rutas según convenga.
+
+git:
+  # No es necesario establecer remote_url para modo local;
+  # si quiere usar un remoto para publicar, ponga aquí la URL.
+  remote_url: ""
+  publish_remote_name: "publish"
+
+dvc:
+  # Uso de almacenamiento local para DVC (file://)
+  storage:
+    url: "file://./.dvc_storage"
+    # type: local
+
+mlflow:
+  # Seguimiento local de MLflow
+  tracking_uri: "file://./mlruns"
+
+notes: |
+  - Este fichero es un ejemplo para entornos locales y CI locales.
+  - Asegúrate de que la ruta indicada en `dvc.storage.url` es escribible.
+  - Para usar este ejemplo: `cp setup/local-example.yaml setup/local.yaml` y editar según sea necesario.

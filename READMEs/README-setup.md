@@ -229,165 +229,200 @@ Un miembro del equipo (el "admin") realiza esto:
    ```bash
    export DAGSHUB_TOKEN=xxxxxxxxxxxxxxxx
    ```
-   Hacerlo permanente en `~/.bashrc` o `~/.zshrc`:
-   ```bash
-   echo 'export DAGSHUB_TOKEN=xxxxxxxxxxxxxxxx' >> ~/.zshrc
-   source ~/.zshrc
-   ```
+  # Setup del proyecto
 
-### 3.2 Paso 2: Clonar y configurar el repositorio
+  Este documento explica cómo configurar y comprobar el proyecto en dos modos distintos:
 
-Cada miembro del equipo:
+  - Modo 1 — Todo local: usar [setup/local.yaml](setup/local.yaml). Recomendado para desarrollo y pruebas sin depender de servicios externos.
+  - Modo 2 — Remoto (Dagshub / GitHub): usar [setup/remote.yaml](setup/remote.yaml). Recomendado para integración o publicación a remotos compartidos.
 
-```bash
-git clone https://github.com/STRAST-UPM/mlops4ofp.git
-cd mlops4ofp
+  En ambos casos la entrada principal es el script de setup y los targets del Makefile. Para detalles de implementación ver [setup/setup.py](setup/setup.py) y [Makefile](Makefile).
 
-# Cambiar remoto de STRAST-UPM a vuestro grupo
-git remote remove origin
+  **Resumen rápido:**
 
-# Opción A: Con HTTPS
-git remote add origin https://github.com/grupoXX/mlops4ofp-grupoXX.git
+  - **Local:** `make setup SETUP_CFG=setup/local.yaml` → `make check-setup` → ejecutar variantes y publicar localmente.
+  - **Remoto (Dagshub):** exportar credenciales `DAGSHUB_USER` y `DAGSHUB_TOKEN`, luego `make setup SETUP_CFG=setup/remote.yaml` → `make check-setup` → publicar a remotos.
 
-# O Opción B: Con SSH
-# git remote add origin git@github.com:grupoXX/mlops4ofp-grupoXX.git
+  **Sugerencia:** siempre preferir ejecutar targets `make` del proyecto (ej.: `make nb1-run VARIANT=v001`) ya que el `Makefile` está preparado para usar el entorno virtual del proyecto y las rutas correctas.
 
-# Verificar
-git remote -v
-```
+  **Tabla de contenidos:**
 
-### 3.3 Paso 3: Editar setup/remote.yaml
+  - **Requisitos (instalación por OS)**
+  - **Modo Local**
+  - **Modo Remoto (Dagshub / GitHub)**
+  - **Comprobaciones: `check_env.py` y `check_setup.py`**
+  - **Flujo típico de uso**
+  - **Solución de problemas comunes**
 
-Reemplaza `grupoXX` con vuestro nombre de usuario/grupo:
+  ## Requisitos (instalación por OS)
 
-```yaml
-git:
-  remote_url: git@github.com:grupoXX/mlops4ofp-grupoXX.git
-```
+  Instale las herramientas básicas: Python 3.8+, Git, Make, y DVC. También se usa un entorno virtual `.venv` para aislar dependencias.
 
-O si prefieres HTTPS:
+  - macOS (con Homebrew):
 
-```yaml
-git:
-  remote_url: https://github.com/grupoXX/mlops4ofp-grupoXX.git
-```
+  ```bash
+  brew update
+  brew install python git make
+  python3 -m pip install --user virtualenv
+  # instalar dvc en el venv (ver pasos más abajo)
+  ```
 
-También necesitas:
+  - Ubuntu / Debian:
 
-```yaml
-dvc:
-  path: "1MixQx_Z9Y2kJ8pQrXs3uVwXyZ1234567890"
+  ```bash
+  sudo apt update && sudo apt install -y python3 python3-venv python3-pip git make
+  ```
 
-mlflow:
-  tracking_uri: https://dagshub.com/grupoXX/mlops4ofp-grupoXX.mlflow
-```
+  - Windows (PowerShell / con Chocolatey):
 
-### 3.4 Paso 4: Ejecutar el setup
+  ```powershell
+  choco install python git make
+  # o instalar manualmente Python desde https://python.org
+  ```
 
-```bash
-echo $DAGSHUB_TOKEN
-make setup SETUP_CFG=setup/remote.yaml
-```
+  Instalación del entorno Python y dependencias del proyecto (válido en cualquier OS):
 
-### 3.5 Paso 5: Verificar
+  ```bash
+  # desde la raíz del repositorio
+  python3 -m venv .venv
+  source .venv/bin/activate   # macOS / Linux
+  # .venv\Scripts\Activate.ps1  # Windows PowerShell
+  pip install -U pip
+  pip install -r requirements.txt
+  ```
 
-```bash
-make check-setup
-```
+  Nota: el `Makefile` está configurado para preferir `.venv/bin/python3` y `.venv/bin/dvc` si existen. Use `make setup` para que el `setup` automatice partes de estas tareas.
 
-### 3.6 Paso 6: Primer push a GitHub
+  ## Modo Local (setup/local.yaml)
 
-```bash
-git add -A
-git commit -m "Initial commit: MLOps4OFP setup"
-git push -u origin main
-```
+  1. Editar `setup/local.yaml` si desea ajustar la ruta de almacenamiento DVC local (por defecto suele apuntar a `./.dvc_storage` o similar).
+  2. Ejecutar:
 
-### 3.7 Continuar con el pipeline
+  ```bash
+  make setup SETUP_CFG=setup/local.yaml
+  make check-setup
+  ```
 
-```bash
-make variant1 VARIANT=v001 RAW=./data/raw.csv CLEANING=basic
-make script1-run VARIANT=v001
-make publish1 VARIANT=v001
-```
+  3. Flujo típico de trabajo local (ejemplo fase 01):
 
----
+  ```bash
+  make variant1 VARIANT=v001 RAW=data/01-raw/01_explore_raw_raw.csv
+  make nb1-run VARIANT=v001
+  make script1-run VARIANT=v001
+  make publish1 VARIANT=v001   # publica artefactos a storage local configurado
+  ```
 
-## 4. Comparación: LOCAL vs REMOTO
+  El modo local no requiere tokens remotos; es útil para desarrollo y CI que no dependa de servicios externos.
 
-| Aspecto | LOCAL | REMOTO |
-|---------|-------|--------|
-| **Git** | Sin remoto | GitHub |
-| **DVC** | .dvc_storage local | Google Drive |
-| **MLflow** | ./mlruns local | DAGsHub |
-| **Cuentas** | Ninguna | 3 (GitHub, Google, DAGsHub) |
-| **Para equipos** | No | Si |
-| **Facilidad** | Muy simple | Intermedia |
-| **Tiempo** | 2 min | 5 min |
+  Qué cambiar en `setup/local.yaml`:
 
----
+  - `storage.url`: ajustar la ruta local a donde desea que DVC almacene objetos (p. ej. `file://./.dvc_storage`).
+  - `git.publish_remote` no es necesaria en el modo local, aunque puede configurarse si lo desea.
 
-## 5. Solución de problemas
+  ## Modo Remoto (Dagshub / GitHub) — setup/remote.yaml
 
-### SSH vs HTTPS — ¿Cuál usar?
+  Este flujo está pensado para publicar a remotos gestionados (GitHub para el código y Dagshub para los artefactos DVC). No se usa Google Drive.
 
-| Aspecto | SSH | HTTPS |
-|---------|-----|-------|
-| **URL** | `git@github.com:grupoXX/...` | `https://github.com/grupoXX/...` |
-| **Seguridad** | Muy alta (clave pública/privada) | Alta (contraseña/token) |
-| **Setup** | Requiere generar SSH key | Sin setup adicional |
-| **Recomendación** | Para equipos/producción | Para simplificar |
-| **macOS/Linux** | Funciona directamente | Funciona directamente |
-| **Windows** | Funciona (con Git Bash) | Más simple |
+  Requisitos previos:
 
-**Si no sabes cuál usar**: Empieza con HTTPS. Si te pide contraseña, usa un "Personal Access Token" desde GitHub:
-- Settings → Developer settings → Personal access tokens
-- Selecciona permisos `repo` (acceso completo a repos privados)
-- Usa el token como contraseña en Git
+  - Cuenta en Dagshub con un repositorio DVC remoto configurado.
+  - Variables de entorno en su máquina (o CI):
 
-### Error: "Git remoto no coincide"
+    - `DAGSHUB_USER` — su usuario Dagshub (o usuario de la organización).
+    - `DAGSHUB_TOKEN` — token personal (crear desde su perfil en Dagshub).
 
-```bash
-git remote remove origin
-git remote add origin <URL_CORRECTA>
-make check-setup
-```
+  Cómo configurar:
 
-### Error: "DVC local: ruta no existe"
+  1. Exporte las variables (Unix/macOS):
 
-```bash
-# Editar setup/remote.yaml con ID correcto
-make setup SETUP_CFG=setup/remote.yaml
-```
+  ```bash
+  export DAGSHUB_USER="<tu_usuario>"
+  export DAGSHUB_TOKEN="<tu_token>"
+  ```
 
-### Error: "DAGSHUB_TOKEN no definido"
+  En Windows PowerShell:
 
-```bash
-echo $DAGSHUB_TOKEN
+  ```powershell
+  $env:DAGSHUB_USER = "<tu_usuario>"
+  $env:DAGSHUB_TOKEN = "<tu_token>"
+  ```
 
-# Si no aparece:
-export DAGSHUB_TOKEN=xxxxx
-echo 'export DAGSHUB_TOKEN=xxxxx' >> ~/.zshrc
-source ~/.zshrc
-```
+  2. Ejecutar el setup remoto:
 
----
+  ```bash
+  make setup SETUP_CFG=setup/remote.yaml
+  make check-setup
+  ```
 
-## 6. Rehacer el setup
+  3. Verificaciones rápidas:
 
-```bash
-make clean-setup
-make setup SETUP_CFG=setup/local.yaml
-```
+  - Compruebe que el remote git `publish` existe y apunta a Dagshub/GitHub:
 
----
+  ```bash
+  git remote -v
+  ```
 
-## 7. Flujo correcto final
+  - Compruebe los remotos DVC:
 
-```bash
-make setup SETUP_CFG=setup/local.yaml
-make check-setup
-make help
-```
+  ```bash
+  .venv/bin/dvc remote list
+  # o simplemente dvc remote list si su PATH apunta al venv
+  ```
 
-**FIN DEL README DE SETUP**
+  4. Flujo típico remoto (ejemplo fase 01):
+
+  ```bash
+  make variant1 VARIANT=v001 RAW=data/01-raw/01_explore_raw_raw.csv
+  make nb1-run VARIANT=v001
+  make script1-run VARIANT=v001
+  make publish1 VARIANT=v001   # hará dvc add + dvc push -r storage y git push al remote publish
+  ```
+
+  Notas de seguridad:
+
+  - Guarde `DAGSHUB_TOKEN` en el gestor de secretos de su CI (GitHub Actions secrets, GitLab CI, etc.).
+  - El `Makefile` y `setup/setup.py` están preparados para crear/actualizar un remote `publish` distinto de `origin`, de modo que las publicaciones no sobrescriban el remoto de desarrollo.
+
+  ## Comprobaciones: `check_env.py` y `check_setup.py`
+
+  El proyecto incluye comprobaciones automatizadas para validar el entorno y la configuración:
+
+  - `setup/check_env.py`: valida herramientas instaladas (Python, pip, DVC, git) y la presencia de un entorno virtual.
+  - `setup/check_setup.py`: valida el fichero de configuración `SETUP_CFG` (por ejemplo `setup/remote.yaml` o `setup/local.yaml`), remotos DVC/git y credenciales.
+
+  Uso recomendado:
+
+  ```bash
+  # Ejecutar las comprobaciones a través del Makefile
+  make check-setup
+
+  # O ejecutarlas manualmente (dentro del venv):
+  source .venv/bin/activate
+  python setup/check_env.py
+  python setup/check_setup.py --config setup/remote.yaml
+  ```
+
+  El objetivo de `make check-setup` es agrupar ambas comprobaciones; si falla, revise los mensajes y corrija las dependencias o variables de entorno necesarias.
+
+  ## Flujo típico (resumen)
+
+  1. Crear y activar entorno virtual
+  2. `make setup SETUP_CFG=setup/local.yaml` (o `setup/remote.yaml`)
+  3. `make check-setup`
+  4. Crear variante: `make variant1 VARIANT=v001 RAW=...`
+  5. Ejecutar notebook/script: `make nb1-run VARIANT=v001` y `make script1-run VARIANT=v001`
+  6. Publicar: `make publish1 VARIANT=v001`
+
+  ## Solución de problemas comunes
+
+  - Si `make` usa el intérprete global en lugar del `.venv`, active el venv o use `python3 -m venv .venv` y reinstale dependencias.
+  - Si `dvc push` falla con errores de autenticación en el modo remoto, compruebe `DAGSHUB_USER` y `DAGSHUB_TOKEN` y que el remote `storage` en `setup/remote.yaml` apunta a su repositorio Dagshub.
+  - Para comprobar que `publish` no es `origin`, use `git remote -v` y asegúrese que `publish` está configurado según lo esperado.
+
+  ## Referencias
+
+  - Implementación: [setup/setup.py](setup/setup.py)
+  - Orquestador: [Makefile](Makefile)
+  - Flujos y guías específicas: [setup/README-SETUP-FLOWS.md](setup/README-SETUP-FLOWS.md)
+
+  Si desea, puedo añadir ejemplos concretos de `setup/remote.yaml`, fragmentos de configuración para CI (GitHub Actions) o guías paso a paso para equipos. Indique qué prefiere.
