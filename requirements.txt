@@ -3,7 +3,7 @@ numpy
 matplotlib
 pyyaml
 jupyter
-dvc
+dvc[gdrive]
 ipykernel
 python-dotenv
 tqdm

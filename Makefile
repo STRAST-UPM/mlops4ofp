@@ -72,10 +72,12 @@ clean-setup:
 
 ifneq ("$(wildcard .venv/bin/python3)","")
 PYTHON := .venv/bin/python3
+DVC := .venv/bin/dvc
 else
-# Si no existe .venv, usar el intérprete del sistema para permitir targets
+# Si no existe .venv, usar los ejecutables del sistema para permitir targets
 # como `make setup` que crean el entorno virtual.
 PYTHON := python3
+DVC := dvc
 endif
 
 $(info [INFO] Usando intérprete Python: $(PYTHON))
@@ -107,33 +109,23 @@ publish-generic: check-variant-format
 	@git add $(VARIANTS_DIR)/variants.yaml || true
 	@git commit -m "publish variant: $(PHASE) $(VARIANT)" || true
 	# Comprobaciones previas: remoto DVC 'storage' debe existir
-	@if ! dvc remote list 2>/dev/null | grep -q "^storage"; then \
+	@if ! $(DVC) remote list 2>/dev/null | grep -q "^storage"; then \
 		echo "[ERROR] Remote DVC 'storage' no configurado. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
 	fi
 	# Si existe remote git 'publish' lo usamos; si no existe pero el setup está en
 	# modo git.mode=none (local), permitimos commit local y dvc push.
-	if git remote | grep -q "^publish$$"; then \
+	# Determinamos el modo mediante script Python (usa .venv)
+	@MODE=$$($(PYTHON) scripts/check_publish_mode.py); \
+	if [ "$$MODE" = "publish" ]; then \
 		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+	elif [ "$$MODE" = "none" ]; then \
+		echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
 	else \
-		# comprobar si setup indica git.mode: none
-		PY_MODE=$$(python3 - <<'PY'
-import sys, yaml, pathlib
-f=pathlib.Path('.mlops4ofp/setup.yaml')
-if not f.exists(): print('')
-else:
-    cfg=yaml.safe_load(f.read_text())
-    print(cfg.get('git',{}).get('mode',''))
-PY
-); \
-		if [ "$$PY_MODE" = "none" ]; then \
-			echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
-		else \
-			echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
-		fi; \
+		echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
 	fi
 	# Finalmente, push DVC al remote 'storage' (puede ser local o remoto)
-	@dvc push -r storage || (echo "[WARN] dvc push failed (credenciales o acceso)"; exit 1)
+	@$(DVC) push -r storage || (echo "[WARN] dvc push failed (credenciales o acceso)"; exit 1)
 	@echo "[OK] Publicación completada: variante $(PHASE):$(VARIANT)"
 
 remove-generic: check-variant-format
@@ -147,32 +139,22 @@ remove-generic: check-variant-format
 	@git add -A
 	@git commit -m "remove variant: $(PHASE) $(VARIANT)" || true
 	# Si existe remote publish empujamos; si setup git.mode=none permitimos omitir
-	if git remote | grep -q "^publish$$"; then \
+	@MODE=$$($(PYTHON) scripts/check_publish_mode.py); \
+	if [ "$$MODE" = "publish" ]; then \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+	elif [ "$$MODE" = "none" ]; then \
+		echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
 	else \
-		PY_MODE=$$(python3 - <<'PY'
-import sys, yaml, pathlib
-f=pathlib.Path('.mlops4ofp/setup.yaml')
-if not f.exists(): print('')
-else:
-    cfg=yaml.safe_load(f.read_text())
-    print(cfg.get('git',{}).get('mode',''))
-PY
-); \
-		if [ "$$PY_MODE" = "none" ]; then \
-			echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
-		else \
-			echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
-		fi; \
+		echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
 	fi
 	@echo "[OK] Variante $(PHASE):$(VARIANT) eliminada completamente."
 
 check-dvc-generic:
 	@echo "===== CHECKING DVC STATUS ($(PHASE)) ====="
 	@echo "[Checking local DVC...]"
-	@dvc status --cloud 2>/dev/null && echo "[OK] Local DVC clean" || echo "[WARN] Local DVC has changes"
+	@$(DVC) status --cloud 2>/dev/null && echo "[OK] Local DVC clean" || echo "[WARN] Local DVC has changes"
 	@echo "[Checking remote DVC (storage)...]"
-	@dvc status -r storage -c 2>/dev/null && echo "[OK] Remote up to date" || echo "[WARN] Remote missing data"
+	@$(DVC) status -r storage -c 2>/dev/null && echo "[OK] Remote up to date" || echo "[WARN] Remote missing data"
 	@echo "================================"
 
 check-results-generic: check-variant-format
@@ -319,8 +301,8 @@ remove1: check-variant-format
 ############################################
 script1-repro:
 	@echo "==> Ejecutando dvc repro $(PHASE1)"
-	dvc repro $(PHASE1)
-	dvc push
+	$(DVC) repro $(PHASE1)
+	$(DVC) push
 
 
 ############################################
