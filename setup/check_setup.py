@@ -57,15 +57,27 @@ def check_git(cfg):
     if not expected:
         fail("git.remote_url no definido en setup.yaml")
 
-    current = run(["git", "remote", "get-url", "origin"])
-    if current != expected:
-        fail(
-            "Remoto Git no coincide con setup\n"
-            f"  esperado: {expected}\n"
-            f"  actual:   {current}"
-        )
+    current = run(["git", "remote", "get-url", "origin"], check=False)
+    if current == expected:
+        ok("Git: remoto origin correcto")
+        return
 
-    ok("Git: remoto origin correcto")
+    # Permitir que el repositorio de desarrollo use otro origin siempre que
+    # exista un remote 'publish' (configurado por `make setup`) que apunte
+    # a la URL esperada. Esto permite desarrollar contra `mlops4ofp` y
+    # publicar a un repo distinto.
+    publish_url = run(["git", "remote", "get-url", "publish"], check=False)
+    if publish_url == expected:
+        ok("Git: remote 'publish' correcto (publicaciones irán ahí)")
+        return
+
+    # Ninguno coincide: fallamos mostrando la diferencia
+    actual = current if current is not None else '<none>'
+    fail(
+        "Remoto Git no coincide con setup\n"
+        f"  esperado: {expected}\n"
+        f"  actual:   {actual}"
+    )
 
 
 def check_dvc(cfg):

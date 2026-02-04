@@ -131,6 +131,50 @@ def setup_dvc_remote(cfg):
         )
         
         print(f"[INFO] DVC remoto 'storage' configurado: {path}")
+    elif backend == "gdrive":
+        path = dvc_cfg.get("path")
+        if not path:
+            abort("dvc.path no definido para backend gdrive")
+
+        remote_url = f"gdrive://{path}"
+        try:
+            subprocess.run(["dvc", "remote", "add", "-d", "storage", remote_url], cwd=ROOT, check=False)
+        except Exception:
+            pass
+
+        subprocess.run(["dvc", "remote", "modify", "storage", "url", remote_url], cwd=ROOT, check=False)
+        print(f"[INFO] DVC remoto 'storage' configurado (gdrive): {remote_url}")
+
+
+def setup_git_remote(cfg):
+    """Configura un remote git llamado 'publish' con la URL del setup.
+
+    Si el repositorio local no existe (no hay .git) o no hay git.remote_url
+    en la configuración, no hace nada.
+    """
+    git_cfg = cfg.get("git", {})
+    remote_url = git_cfg.get("remote_url")
+    if not remote_url:
+        print("[INFO] No se ha definido git.remote_url en la configuración; no se crea remote 'publish'")
+        return
+
+    git_dir = ROOT / ".git"
+    if not git_dir.exists():
+        print("[WARN] Repositorio git no inicializado (.git no existe); omitiendo configuración de remote 'publish'")
+        return
+
+    try:
+        # Si ya existe, actualizar la URL; si no, añadirlo
+        # Usamos git remote get-url para comprobar existencia
+        res = subprocess.run(["git", "remote", "get-url", "publish"], cwd=ROOT, capture_output=True, text=True)
+        if res.returncode == 0:
+            print(f"[INFO] Remote 'publish' ya existe; actualizando URL -> {remote_url}")
+            run(["git", "remote", "set-url", "publish", remote_url])
+        else:
+            print(f"[INFO] Añadiendo remote 'publish' -> {remote_url}")
+            run(["git", "remote", "add", "publish", remote_url])
+    except Exception as e:
+        print(f"[WARN] No se pudo configurar remote 'publish': {e}")
 
 
 # --------------------------------------------------
@@ -185,6 +229,7 @@ def main():
 
     has_env = create_env_sh(cfg)
     setup_dvc_remote(cfg)
+    setup_git_remote(cfg)
 
     print("\n✔ Setup completado correctamente")
     print("Siguientes pasos:")

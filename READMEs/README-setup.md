@@ -121,6 +121,9 @@ Debería ver:
 .venv/                    # Entorno Python
 ```
 
+Nota: si en la configuración (`setup/remote.yaml`) se especifica `git.remote_url`, el `make setup` creará o actualizará un remote git local llamado `publish` apuntando a esa URL. El objetivo `make publish*` usa ese remote `publish` para empujar los commits destinados a los usuarios.
+
+
 ### 2.4 Continuar con el pipeline
 
 ```bash
@@ -137,6 +140,43 @@ make publish1 VARIANT=v001
 ```
 
 ---
+
+**Roles y responsabilidades**
+
+- **Usuarios (consumidores del proyecto)**: Solo deben ejecutar `make` targets documentados (por ejemplo `make publish1`, `make remove1`, `make clean-setup`). No deben interactuar directamente con Git, DVC, Google Drive ni DAGsHub.
+
+- **Administrador del proyecto**: Ejecuta `make setup SETUP_CFG=setup/remote.yaml` una sola vez y se encarga de que los remotos y credenciales estén operativos (SSH keys, `DAGSHUB_TOKEN`, o credenciales de DVC/Google Drive). El setup creará un remote git local `publish` y configurará el remoto DVC `storage`.
+
+- **Desarrolladores**: Trabajan en el repo de desarrollo (`origin` → `mlops4ofp`) y hacen `git push`/`pull` manualmente como de costumbre. Las publicaciones para usuarios se realizan desde la rama de publicación y el remote `publish`.
+
+**Flujo para Usuarios (sin tocar cuentas)**
+
+1. Asegurarse de que el administrador ya ejecutó `make setup` con `setup/remote.yaml` y que los remotos funcionan.
+2. Crear o cambiar a la rama de publicación si aplica:
+```bash
+git checkout -b stable-for-users
+```
+3. Generar variante y publicar (todo gestionado por `make`):
+```bash
+make variant1 VARIANT=v001 RAW=./data/raw.csv CLEANING=basic
+make script1-run VARIANT=v001
+make publish1 VARIANT=v001
+```
+
+`make publish1` realizará:
+- Validaciones internas
+- `dvc add` de artefactos
+- `git commit` de cambios en `executions/` (si corresponde)
+- `git push` hacia el remote `publish` (configurado por el setup)
+- `dvc push -r storage` hacia el remote DVC configurado (local o gdrive)
+
+Si alguna comprobación falla, `make` mostrará instrucciones claras para contactar con el administrador.
+
+**Flujo para Desarrolladores**
+
+- Seguir trabajando en el repo `mlops4ofp` (remoto `origin`) y hacer `git add/commit/push` manualmente.
+- Si se desea publicar un snapshot para usuarios, crear la rama `stable-for-users` y seguir el flujo de usuario para ejecutar `make publish*`.
+
 
 ## 3. Setup REMOTO (GitHub + Google Drive + DAGsHub)
 

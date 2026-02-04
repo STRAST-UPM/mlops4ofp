@@ -106,8 +106,34 @@ publish-generic: check-variant-format
 	@git add -f $(VARIANTS_DIR)/$(VARIANT)/*.dvc || true
 	@git add $(VARIANTS_DIR)/variants.yaml || true
 	@git commit -m "publish variant: $(PHASE) $(VARIANT)" || true
-	@if [ -n "$$(git remote)" ]; then git push; else echo "[SKIP] No remotes definidos, omitiendo push"; fi
-	@dvc push || true
+	# Comprobaciones previas: remoto DVC 'storage' debe existir
+	@if ! dvc remote list 2>/dev/null | grep -q "^storage"; then \
+		echo "[ERROR] Remote DVC 'storage' no configurado. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
+	fi
+	# Si existe remote git 'publish' lo usamos; si no existe pero el setup está en
+	# modo git.mode=none (local), permitimos commit local y dvc push.
+	if git remote | grep -q "^publish$$"; then \
+		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
+		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+	else \
+		# comprobar si setup indica git.mode: none
+		PY_MODE=$$(python3 - <<'PY'
+import sys, yaml, pathlib
+f=pathlib.Path('.mlops4ofp/setup.yaml')
+if not f.exists(): print('')
+else:
+    cfg=yaml.safe_load(f.read_text())
+    print(cfg.get('git',{}).get('mode',''))
+PY
+); \
+		if [ "$$PY_MODE" = "none" ]; then \
+			echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
+		else \
+			echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
+		fi; \
+	fi
+	# Finalmente, push DVC al remote 'storage' (puede ser local o remoto)
+	@dvc push -r storage || (echo "[WARN] dvc push failed (credenciales o acceso)"; exit 1)
 	@echo "[OK] Publicación completada: variante $(PHASE):$(VARIANT)"
 
 remove-generic: check-variant-format
@@ -120,7 +146,25 @@ remove-generic: check-variant-format
 	@echo "==> Commit + push"
 	@git add -A
 	@git commit -m "remove variant: $(PHASE) $(VARIANT)" || true
-	@if [ -n "$$(git remote)" ]; then git push; else echo "[SKIP] No remotes definidos, omitiendo push"; fi
+	# Si existe remote publish empujamos; si setup git.mode=none permitimos omitir
+	if git remote | grep -q "^publish$$"; then \
+		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+	else \
+		PY_MODE=$$(python3 - <<'PY'
+import sys, yaml, pathlib
+f=pathlib.Path('.mlops4ofp/setup.yaml')
+if not f.exists(): print('')
+else:
+    cfg=yaml.safe_load(f.read_text())
+    print(cfg.get('git',{}).get('mode',''))
+PY
+); \
+		if [ "$$PY_MODE" = "none" ]; then \
+			echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
+		else \
+			echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
+		fi; \
+	fi
 	@echo "[OK] Variante $(PHASE):$(VARIANT) eliminada completamente."
 
 check-dvc-generic:
