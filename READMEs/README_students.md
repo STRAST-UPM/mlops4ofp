@@ -8,9 +8,7 @@ para modelos de Online Failure Prediction (OFP).
 ```bash
 git clone <URL_DEL_REPOSITORIO>
 cd mlops4ofp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+make setup SETUP_CFG=setup/local.yaml
 ```
 
 ## Dataset de entrada

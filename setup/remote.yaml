@@ -3,14 +3,21 @@
 # ============================================================
 #
 # Configuración completa para trabajar con remotes:
-#   - Git: GitHub (repositorio privado del grupo)
-#   - DVC: Google Drive (almacenamiento de datasets)
+#   - Git: GitHub 
+#   - DVC: DAGsHub (repositorio DVC)
 #   - MLflow: DAGsHub (tracking de experimentos)
 #
 # Requisitos previos:
-#   1. Repositorio privado en GitHub CREADO
-#   2. Carpeta en Google Drive CREADA
-#   3. Cuenta en DAGsHub CREADA + token generado
+# 1. GITHUB
+#    - Crear cuenta en https://github.com
+#    - Crear repositorio PRIVADO vacío
+#    - Verificar acceso: git ls-remote <remote_url>
+#
+# 2. DAGSHUB
+#    - Crear cuenta en https://dagshub.com
+#    - Crear repositorio privado en DAGsHub
+#    - Generar Access Token (Settings → API)
+#    - Exportar: export DAGSHUB_TOKEN=xxxxx
 #
 # Uso:
 #   make setup SETUP_CFG=setup/remote.yaml
@@ -18,116 +25,15 @@
 #
 # ============================================================
 
-# ------------------------------------------------------------
-# GIT — Control de versiones del código (REMOTO)
-# ------------------------------------------------------------
 git:
-  # mode: custom
-  # Repositorio Git remoto del grupo (OBLIGATORIO).
-  #
   mode: custom
-
-  # remote_url:
-  # URL HTTPS o SSH del repositorio GitHub PRIVADO del grupo.
-  #
-  # HTTPS (RECOMENDADO para empezar):
-  #   https://github.com/grupoXX/mlops4ofp-grupoXX.git
-  #   (requiere Personal Access Token como contraseña)
-  #
-  # SSH (más seguro, requiere SSH key configurada):
-  #   git@github.com:grupoXX/mlops4ofp-grupoXX.git
-  #
-  # ⚠️ El repositorio DEBE existir en GitHub antes del setup.
-  # ⚠️ El repositorio DEBE estar PRIVADO.
-  #
-  #remote_url: https://github.com/grupoXX/mlops4ofp-grupoXX.git
   remote_url: https://github.com/STRAST-UPM/MLOps4OFP-APSE.git
 
-
-# ------------------------------------------------------------
-# DVC — Backend de almacenamiento (GOOGLE DRIVE)
-# ============================================================
 dvc:
-  # backend: gdrive
-  # Almacenamiento en Google Drive (sin servidor propio).
-  #
-  backend: gdrive
-
-  # path:
-  # ID de la carpeta de Google Drive donde DVC almacenará los datos.
-  #
-  # ¿CÓMO OBTENER EL ID?
-  #
-  # 1. Crea una carpeta en Google Drive (ej: "MLOps4OFP-grupoXX")
-  # 2. Abre la carpeta
-  # 3. Copia el ID de la URL:
-  #    https://drive.google.com/drive/folders/[ESTE_ES_EL_ID]
-  #
-  # EJEMPLO:
-  #   1MixQx_Z9Y2kJ8pQrXs3uVwXyZ1234567890
-  #
-  #path: "1MixQx_Z9Y2kJ8pQrXs3uVwXyZ1234567890"
-  #path: "1I-8mUX5VHDmwIRAeTsU1ZfJS-XHSve4h"
-  path: "1W2Qh8M-Yvt-Qt5fGl7DP0AljAqQHVdIQ"
-
-
-# ------------------------------------------------------------
-# MLFLOW — Tracking de experimentos (DAGSHUB)
-# ============================================================
-mlflow:
-  # enabled: true
-  # MLflow está activo, se usará para tracking de experimentos.
-  #
-  enabled: true
-
-  # backend: dagshub
-  # MLflow remoto en DAGsHub.
-  #
   backend: dagshub
+  repo: mlops4ofp/mlops4ofp-apse
 
-  # tracking_uri:
-  # URI estándar de MLflow en DAGsHub.
-  #
-  # FORMATO:
-  #   https://dagshub.com/<usuario_dagshub>/<nombre_repo>.mlflow
-  #
-  # EJEMPLO:
-  #   https://dagshub.com/grupo01/mlops4ofp.mlflow
-  #
-  #tracking_uri: https://dagshub.com/grupoXX/mlops4ofp.mlflow
+mlflow:
+  enabled: true
+  backend: dagshub
   tracking_uri: https://dagshub.com/mlops4ofp/mlops4ofp-apse.mlflow
-
-
-# ============================================================
-# REQUISITOS PREVIOS DETALLADOS
-# ============================================================
-#
-# 1. GITHUB
-#    - Crear cuenta en https://github.com
-#    - Crear repositorio PRIVADO vacío
-#    - Generar clave SSH (o usar HTTPS)
-#    - Verificar acceso: git ls-remote <remote_url>
-#
-# 2. GOOGLE DRIVE
-#    - Abrir Google Drive
-#    - Crear carpeta "MLOps4OFP-grupoXX"
-#    - Obtener el ID de la carpeta
-#    - DVC pedirá permisos durante el setup
-#
-# 3. DAGSHUB
-#    - Crear cuenta en https://dagshub.com
-#    - Crear repositorio privado en DAGsHub
-#    - Generar Access Token (Settings → API)
-#    - Exportar: export DAGSHUB_TOKEN=xxxxx
-#
-# ============================================================
-#
-# VALIDACIÓN:
-#   make check-setup
-#
-# Si falla, verifica:
-#   - GitHub remoto accessible (ssh/https)
-#   - Google Drive carpeta ID correcto
-#   - DAGSHUB_TOKEN variable de entorno definida
-#
-# ============================================================

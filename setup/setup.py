@@ -12,7 +12,7 @@ CONFIG_FILE = CONFIG_DIR / "setup.yaml"
 
 
 # --------------------------------------------------
-# Utilidades básicas (solo stdlib)
+# Utilidades
 # --------------------------------------------------
 
 def run(cmd, cwd=ROOT, check=True):
@@ -26,7 +26,7 @@ def abort(msg):
 
 
 # --------------------------------------------------
-# Bootstrap del entorno Python
+# Bootstrap Python
 # --------------------------------------------------
 
 def ensure_venv():
@@ -37,144 +37,166 @@ def ensure_venv():
     print("[INFO] Creando entorno virtual .venv")
     run([sys.executable, "-m", "venv", ".venv"])
 
-    pip = VENV / "bin" / "pip"
     req = ROOT / "requirements.txt"
-
     if not req.exists():
         abort("requirements.txt no encontrado")
 
+    pip = VENV / "bin" / "pip"
     print("[INFO] Instalando dependencias")
     run([str(pip), "install", "-r", str(req)])
 
-
-# --------------------------------------------------
-# Asegurar ejecución dentro del venv
-# --------------------------------------------------
 
 def ensure_running_in_venv(argv):
     if sys.executable == str(VENV_PYTHON):
         return
 
     print("[INFO] Reejecutando setup dentro de .venv")
-    cmd = [str(VENV_PYTHON), __file__] + argv
-    run(cmd)
+    run([str(VENV_PYTHON), __file__] + argv)
     sys.exit(0)
 
 
 # --------------------------------------------------
-# Creación de env.sh (solo variables de entorno)
+# Validación estructural del setup
+# --------------------------------------------------
+
+def validate_cfg(cfg):
+    # ---------- DVC ----------
+    dvc = cfg.get("dvc", {})
+    backend = dvc.get("backend")
+
+    if backend not in ("local", "dagshub"):
+        abort(f"Backend DVC no soportado: {backend}")
+
+    if backend == "local":
+        if not dvc.get("path"):
+            abort("dvc.path obligatorio cuando backend=local")
+
+    if backend == "dagshub":
+        if not dvc.get("repo"):
+            abort("dvc.repo obligatorio cuando backend=dagshub (formato org/repo)")
+
+    # ---------- MLflow ----------
+    ml = cfg.get("mlflow", {})
+    if ml.get("enabled", False):
+        uri = ml.get("tracking_uri")
+        if not uri:
+            abort("MLflow habilitado pero falta mlflow.tracking_uri")
+
+        backend_ml = ml.get("backend", "local")
+        if backend_ml == "dagshub" and "dagshub.com" not in uri:
+            abort("MLflow backend dagshub requiere tracking_uri en dagshub.com")
+
+    # ---------- Git ----------
+    git = cfg.get("git", {})
+    if git.get("mode") == "custom" and not git.get("remote_url"):
+        abort("git.remote_url obligatorio cuando git.mode=custom")
+
+
+# --------------------------------------------------
+# env.sh (MLflow)
 # --------------------------------------------------
 
 def create_env_sh(cfg):
     ml = cfg.get("mlflow", {})
     if not ml.get("enabled", False):
-        return False
+        return
 
-    tracking_uri = ml.get("tracking_uri")
-    if not tracking_uri:
-        abort("MLflow habilitado pero falta mlflow.tracking_uri")
-
-    CONFIG_DIR.mkdir(exist_ok=True)
     env_file = CONFIG_DIR / "env.sh"
-
     content = [
         "#!/usr/bin/env sh",
-        "# Archivo generado por setup.py — NO editar a mano",
+        "# Generado por setup.py — NO editar",
         "",
-        f"export MLFLOW_TRACKING_URI={tracking_uri}",
+        f"export MLFLOW_TRACKING_URI={ml['tracking_uri']}",
         "",
     ]
-
     env_file.write_text("\n".join(content))
     env_file.chmod(0o755)
-
-    print("[INFO] Creado .mlops4ofp/env.sh (MLflow)")
-    return True
+    print("[INFO] Creado .mlops4ofp/env.sh")
 
 
 # --------------------------------------------------
-# Configuración de DVC remoto
+# DVC
 # --------------------------------------------------
+
+import os
+
+def setup_dvc_remote_dagshub(cfg):
+    dvc_cfg = cfg.get("dvc", {})
+    repo = dvc_cfg.get("repo")
+    if not repo:
+        abort("dvc.repo no definido para backend dagshub")
+
+    user = os.environ.get("DAGSHUB_USER")
+    token = os.environ.get("DAGSHUB_TOKEN")
+
+    if not user or not token:
+        abort(
+            "Backend DAGsHub seleccionado pero faltan credenciales.\n"
+            "Define las variables de entorno:\n"
+            "  export DAGSHUB_USER=...\n"
+            "  export DAGSHUB_TOKEN=..."
+        )
+
+    remote_url = f"https://dagshub.com/{repo}.dvc"
+
+    print(f"[INFO] Configurando DVC DAGsHub: {remote_url}")
+
+    # Añadir o actualizar remoto
+    run(["dvc", "remote", "add", "-d", "storage", remote_url], check=False)
+    run(["dvc", "remote", "modify", "storage", "url", remote_url])
+
+    # Autenticación obligatoria
+    run(["dvc", "remote", "modify", "storage", "auth", "basic"])
+    run(["dvc", "remote", "modify", "storage", "user", user])
+    run(["dvc", "remote", "modify", "storage", "password", token])
+
+    print("[OK] DVC DAGsHub configurado con autenticación")
+
+
 
 def setup_dvc_remote(cfg):
-    """Configura el remoto DVC según la configuración."""
-    dvc_cfg = cfg.get("dvc", {})
-    backend = dvc_cfg.get("backend")
-    
-    if not backend:
-        return
-    
+    dvc = cfg["dvc"]
+    backend = dvc["backend"]
+
     if backend == "local":
-        path = dvc_cfg.get("path")
-        if not path:
-            abort("dvc.path no definido para backend local")
-        
-        storage_path = Path(path)
-        storage_path.mkdir(parents=True, exist_ok=True)
-        
-        # Configurar remoto DVC
-        try:
-            # Primero intenta agregar el remoto; si ya existe, lo modifica
-            subprocess.run(
-                ["dvc", "remote", "add", "-d", "storage", str(storage_path)],
-                cwd=ROOT,
-                capture_output=True
-            )
-        except:
-            pass
-        
-        # Asegurar que está configurado con la ruta correcta
-        subprocess.run(
-            ["dvc", "remote", "modify", "storage", "url", str(storage_path)],
-            cwd=ROOT,
-            check=False
-        )
-        
-        print(f"[INFO] DVC remoto 'storage' configurado: {path}")
-    elif backend == "gdrive":
-        path = dvc_cfg.get("path")
-        if not path:
-            abort("dvc.path no definido para backend gdrive")
+        path = Path(dvc["path"])
+        path.mkdir(parents=True, exist_ok=True)
+        run(["dvc", "remote", "add", "-d", "storage", str(path)], check=False)
+        run(["dvc", "remote", "modify", "storage", "url", str(path)], check=False)
+        print(f"[INFO] DVC local configurado: {path}")
+        return
 
-        remote_url = f"gdrive://{path}"
-        try:
-            subprocess.run(["dvc", "remote", "add", "-d", "storage", remote_url], cwd=ROOT, check=False)
-        except Exception:
-            pass
+    elif backend == "dagshub":
+        setup_dvc_remote_dagshub(cfg)
 
-        subprocess.run(["dvc", "remote", "modify", "storage", "url", remote_url], cwd=ROOT, check=False)
-        print(f"[INFO] DVC remoto 'storage' configurado (gdrive): {remote_url}")
 
+# --------------------------------------------------
+# Git (remote publish)
+# --------------------------------------------------
 
 def setup_git_remote(cfg):
-    """Configura un remote git llamado 'publish' con la URL del setup.
-
-    Si el repositorio local no existe (no hay .git) o no hay git.remote_url
-    en la configuración, no hace nada.
-    """
-    git_cfg = cfg.get("git", {})
-    remote_url = git_cfg.get("remote_url")
-    if not remote_url:
-        print("[INFO] No se ha definido git.remote_url en la configuración; no se crea remote 'publish'")
+    git = cfg.get("git", {})
+    url = git.get("remote_url")
+    if not url:
         return
 
-    git_dir = ROOT / ".git"
-    if not git_dir.exists():
-        print("[WARN] Repositorio git no inicializado (.git no existe); omitiendo configuración de remote 'publish'")
+    if not (ROOT / ".git").exists():
+        print("[WARN] No es un repo Git, no se configura remote 'publish'")
         return
 
-    try:
-        # Si ya existe, actualizar la URL; si no, añadirlo
-        # Usamos git remote get-url para comprobar existencia
-        res = subprocess.run(["git", "remote", "get-url", "publish"], cwd=ROOT, capture_output=True, text=True)
-        if res.returncode == 0:
-            print(f"[INFO] Remote 'publish' ya existe; actualizando URL -> {remote_url}")
-            run(["git", "remote", "set-url", "publish", remote_url])
-        else:
-            print(f"[INFO] Añadiendo remote 'publish' -> {remote_url}")
-            run(["git", "remote", "add", "publish", remote_url])
-    except Exception as e:
-        print(f"[WARN] No se pudo configurar remote 'publish': {e}")
+    res = subprocess.run(
+        ["git", "remote", "get-url", "publish"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    if res.returncode == 0:
+        run(["git", "remote", "set-url", "publish", url])
+        print("[INFO] Actualizado remote 'publish'")
+    else:
+        run(["git", "remote", "add", "publish", url])
+        print("[INFO] Añadido remote 'publish'")
 
 
 # --------------------------------------------------
@@ -187,8 +209,8 @@ def main():
     )
     parser.add_argument(
         "-c", "--config",
-        help="Fichero YAML de configuración (modo no interactivo)",
-        default=str(ROOT / "setup" / "example_setup.yaml")
+        required=True,
+        help="Fichero YAML de configuración (local.yaml, remote.yaml, etc.)",
     )
 
     args = parser.parse_args()
@@ -197,42 +219,35 @@ def main():
     print(" MLOps4OFP — Setup del proyecto")
     print("====================================")
 
-    # 1️⃣ Bootstrap Python
     ensure_venv()
-
-    # 2️⃣ Reejecutar dentro del venv
     ensure_running_in_venv(sys.argv[1:])
-
-    # --------------------------------------------------
-    # A partir de aquí YA estamos en el venv
-    # --------------------------------------------------
 
     import yaml
 
     if CONFIG_FILE.exists():
-        print("[INFO] El setup ya fue realizado previamente.")
-        print(f"[INFO] Configuración existente en {CONFIG_FILE}")
-        print("Siguientes pasos:")
-        print("  make check-setup")
+        print("[INFO] El setup ya fue realizado previamente")
+        print("Ejecuta make check-setup")
         return
 
     cfg_path = Path(args.config)
     if not cfg_path.exists():
-        abort(f"No existe el fichero de configuración: {cfg_path}")
+        abort(f"No existe el fichero: {cfg_path}")
 
     cfg = yaml.safe_load(cfg_path.read_text())
     if not isinstance(cfg, dict):
         abort("Fichero de configuración inválido")
 
+    validate_cfg(cfg)
+
     CONFIG_DIR.mkdir(exist_ok=True)
     CONFIG_FILE.write_text(yaml.dump(cfg))
 
-    has_env = create_env_sh(cfg)
+    create_env_sh(cfg)
     setup_dvc_remote(cfg)
     setup_git_remote(cfg)
 
     print("\n✔ Setup completado correctamente")
-    print("Siguientes pasos:")
+    print("Siguiente paso:")
     print("  make check-setup")
 
 

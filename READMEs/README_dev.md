@@ -3,13 +3,12 @@
 Pipeline phase/variant para generación reproducible de datasets OFP.
 
 ## Instalación
+Leer instrucciones de creación de cuentas en setup/remote.yaml
 
 ```bash
 git clone <URL_DEL_REPOSITORIO>
 cd mlops4ofp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+make setup SETUP_CFG=setup/remote.yaml
 ```
 
 ## Dataset de entrada

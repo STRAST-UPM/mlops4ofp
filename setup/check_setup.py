@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG_FILE = ROOT / ".mlops4ofp" / "setup.yaml"
+ENV_FILE = ROOT / ".mlops4ofp" / "env.sh"
 
 
 # --------------------------------------------------
@@ -22,10 +23,6 @@ def ok(msg):
     print(f"[OK] {msg}")
 
 
-def is_git_repo():
-    return (ROOT / ".git").exists()
-
-
 def run(cmd, check=True):
     try:
         out = subprocess.check_output(
@@ -36,6 +33,10 @@ def run(cmd, check=True):
         if check:
             fail(f"Comando falló: {' '.join(cmd)}\n{e.output.decode()}")
         return None
+
+
+def is_git_repo():
+    return (ROOT / ".git").exists()
 
 
 # --------------------------------------------------
@@ -51,28 +52,23 @@ def check_git(cfg):
         return
 
     if not is_git_repo():
-        fail("Git requerido por el setup, pero este directorio no es un repo Git")
+        fail("Git requerido por el setup, pero este directorio no es un repositorio Git")
 
     expected = git_cfg.get("remote_url")
     if not expected:
         fail("git.remote_url no definido en setup.yaml")
 
-    current = run(["git", "remote", "get-url", "origin"], check=False)
-    if current == expected:
+    origin = run(["git", "remote", "get-url", "origin"], check=False)
+    if origin == expected:
         ok("Git: remoto origin correcto")
         return
 
-    # Permitir que el repositorio de desarrollo use otro origin siempre que
-    # exista un remote 'publish' (configurado por `make setup`) que apunte
-    # a la URL esperada. Esto permite desarrollar contra `mlops4ofp` y
-    # publicar a un repo distinto.
-    publish_url = run(["git", "remote", "get-url", "publish"], check=False)
-    if publish_url == expected:
-        ok("Git: remote 'publish' correcto (publicaciones irán ahí)")
+    publish = run(["git", "remote", "get-url", "publish"], check=False)
+    if publish == expected:
+        ok("Git: remoto 'publish' correcto (publicaciones irán ahí)")
         return
 
-    # Ninguno coincide: fallamos mostrando la diferencia
-    actual = current if current is not None else '<none>'
+    actual = origin if origin else "<none>"
     fail(
         "Remoto Git no coincide con setup\n"
         f"  esperado: {expected}\n"
@@ -104,17 +100,15 @@ def check_dvc(cfg):
         ok("DVC local: ruta accesible y escribible")
 
     elif backend == "dagshub":
-        if "dagshub.com" not in remotes:
-            fail("DVC backend dagshub esperado pero no detectado")
-        ok("DVC dagshub: remoto configurado")
+        cfg_local = run(["dvc", "config", "--local", "--list"], check=False)
 
-    elif backend == "gdrive":
-        if "gdrive://" not in remotes:
-            fail("DVC backend gdrive esperado pero no detectado")
-        ok("DVC gdrive: remoto configurado")
-
-    else:
-        fail(f"Backend DVC desconocido: {backend}")
+        if "remote.storage.user" not in cfg_local or "remote.storage.password" not in cfg_local:
+            fail(
+                "DVC DAGsHub configurado pero faltan credenciales locales.\n"
+                "Ejecuta 'make setup' con DAGSHUB_USER y DAGSHUB_TOKEN definidos."
+            )
+        else:
+            fail(f"Backend DVC no soportado: {backend}")
 
 
 def check_mlflow(cfg):
@@ -127,13 +121,12 @@ def check_mlflow(cfg):
     if not uri:
         fail("MLflow habilitado pero tracking_uri no definido")
 
-    env = ROOT / ".mlops4ofp" / "env.sh"
-    if not env.exists():
+    if not ENV_FILE.exists():
         fail("MLflow habilitado pero falta .mlops4ofp/env.sh")
 
-    content = env.read_text()
+    content = ENV_FILE.read_text()
     if f"MLFLOW_TRACKING_URI={uri}" not in content:
-        fail("MLFLOW_TRACKING_URI no exportado correctamente")
+        fail("MLFLOW_TRACKING_URI no exportado correctamente en env.sh")
 
     ok("MLflow: configuración válida")
 

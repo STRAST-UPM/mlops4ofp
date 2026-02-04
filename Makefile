@@ -47,11 +47,11 @@ help-setup:
 
 setup:
 	@echo "==> Ejecutando setup del proyecto"
-ifdef SETUP_CFG
-	@python3 $(SETUP_PY) --config $(SETUP_CFG)
-else
-	@python3 $(SETUP_PY)
+ifndef SETUP_CFG
+	$(error Debes especificar SETUP_CFG=<fichero.yaml> (ej: setup/local.yaml o setup/remote.yaml))
 endif
+	@python3 $(SETUP_PY) --config $(SETUP_CFG)
+
 
 check-setup:
 	@echo "==> Verificando entorno base"
@@ -63,6 +63,33 @@ clean-setup:
 	@echo "==> Eliminando configuración de setup"
 	@rm -rf .mlops4ofp
 	@echo "[OK] Setup eliminado. El proyecto vuelve a estado post-clone."
+
+############################################
+# ADMIN — DVC GARBAGE COLLECTION (PELIGRO)
+############################################
+
+gc-admin:
+	@echo "==============================================="
+	@echo " ⚠️  DVC GARBAGE COLLECTION — ADMINISTRADOR ⚠️"
+	@echo "==============================================="
+	@echo ""
+	@echo "Esta operación eliminará DEFINITIVAMENTE"
+	@echo "los blobs DVC no referenciados por NINGÚN commit."
+	@echo ""
+	@echo "Remoto afectado: 'storage'"
+	@echo ""
+	@echo "NO ejecutar si no sabes exactamente lo que haces."
+	@echo ""
+	@read -p "Escribe EXACTAMENTE 'GC-ADMIN' para continuar: " CONFIRM; \
+	if [ "$$CONFIRM" != "GC-ADMIN" ]; then \
+		echo "[ABORT] Operación cancelada."; exit 1; \
+	fi
+	@echo ""
+	@echo "==> Ejecutando dvc gc (esto puede tardar)..."
+	@$(DVC) gc -r storage --all-branches --all-tags --all-commits --force
+	@echo ""
+	@echo "[OK] Garbage collection completada en remoto DVC."
+
 
 
 
