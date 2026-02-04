@@ -1,0 +1,97 @@
+{
+  "nulls": {
+    "Timestamp": 0,
+    "Battery_Active_Power": 0,
+    "Battery_Active_Power_Set_Response": 0,
+    "PVPCS_Active_Power": 0,
+    "GE_Body_Active_Power": 0,
+    "GE_Active_Power": 0,
+    "GE_Body_Active_Power_Set_Response": 0,
+    "FC_Active_Power_FC_END_Set": 0,
+    "FC_Active_Power": 0,
+    "FC_Active_Power_FC_end_Set_Response": 0,
+    "Island_mode_MCCB_Active_Power": 0,
+    "MG-LV-MSB_AC_Voltage": 0,
+    "Receiving_Point_AC_Voltage": 0,
+    "Island_mode_MCCB_AC_Voltage": 0,
+    "Island_mode_MCCB_Frequency": 0,
+    "MG-LV-MSB_Frequency": 0,
+    "Inlet_Temperature_of_Chilled_Water": 0,
+    "Outlet_Temperature": 0,
+    "segs_diff": 1
+  },
+  "constant_columns": [],
+  "outliers_IQR": {
+    "Battery_Active_Power": 232483,
+    "Battery_Active_Power_Set_Response": 456643,
+    "PVPCS_Active_Power": 266862,
+    "GE_Body_Active_Power": 2572,
+    "GE_Active_Power": 17219,
+    "GE_Body_Active_Power_Set_Response": 2572,
+    "FC_Active_Power_FC_END_Set": 315946,
+    "FC_Active_Power": 807635,
+    "FC_Active_Power_FC_end_Set_Response": 331742,
+    "Island_mode_MCCB_Active_Power": 5204,
+    "MG-LV-MSB_AC_Voltage": 3135,
+    "Receiving_Point_AC_Voltage": 21998,
+    "Island_mode_MCCB_AC_Voltage": 13252,
+    "Island_mode_MCCB_Frequency": 263054,
+    "MG-LV-MSB_Frequency": 268234,
+    "Inlet_Temperature_of_Chilled_Water": 2881,
+    "Outlet_Temperature": 2617,
+    "segs_diff": 11
+  },
+  "suspect_values": {
+    "Battery_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "Battery_Active_Power_Set_Response": {
+      "nan_value_-999999.0": 2571
+    },
+    "PVPCS_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "GE_Body_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "GE_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "GE_Body_Active_Power_Set_Response": {
+      "nan_value_-999999.0": 2571
+    },
+    "FC_Active_Power_FC_END_Set": {
+      "nan_value_-999999.0": 1406
+    },
+    "FC_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "FC_Active_Power_FC_end_Set_Response": {
+      "nan_value_-999999.0": 2571
+    },
+    "Island_mode_MCCB_Active_Power": {
+      "nan_value_-999999.0": 2571
+    },
+    "MG-LV-MSB_AC_Voltage": {
+      "nan_value_-999999.0": 2571
+    },
+    "Receiving_Point_AC_Voltage": {
+      "nan_value_-999999.0": 2571
+    },
+    "Island_mode_MCCB_AC_Voltage": {
+      "nan_value_-999999.0": 2571
+    },
+    "Island_mode_MCCB_Frequency": {
+      "nan_value_-999999.0": 2571
+    },
+    "MG-LV-MSB_Frequency": {
+      "nan_value_-999999.0": 2571
+    },
+    "Inlet_Temperature_of_Chilled_Water": {
+      "nan_value_-999999.0": 2571
+    },
+    "Outlet_Temperature": {
+      "nan_value_-999999.0": 2571
+    }
+  }
+}

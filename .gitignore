@@ -26,16 +26,18 @@ exports/
 data/raw_merged.csv
 data/raw.csv
 
+setup/gdrive_credentials.json
+
 # === IGNORAR ARTEFACTOS DE VARIANTES ===
-params/*/v*/**/*.parquet
-params/*/v*/**/*.csv
-params/*/v*/**/*.json
-params/*/v*/**/*.html
-params/*/v*/**/figures/
-params/*/v*/**/reports/
+executions/*/v*/**/*.parquet
+executions/*/v*/**/*.csv
+executions/*/v*/**/*.json
+executions/*/v*/**/*.html
+executions/*/v*/**/figures/
+executions/*/v*/**/reports/
 
 # ⚠️ PERMITIR ARCHIVOS .dvc (son ligeros y necesarios)
-!params/*/v*/*.dvc
+!executions/*/v*/*.dvc
 
 # === NOTEBOOKS ANTIGUOS ===
 notebooks-old/*
