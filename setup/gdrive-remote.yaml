@@ -1,0 +1,105 @@
+# ============================================================
+# MLOps4OFP — Configuración de Setup REMOTO + Google Drive
+# (CON AUTENTICACIÓN NO-INTERACTIVA VIA SERVICE ACCOUNT)
+# ============================================================
+#
+# Igual que remote.yaml pero diseñado para usar:
+# - Google Drive (DVC backend)
+# - Service Account JSON para autenticación NO-INTERACTIVA
+#
+# Requisitos previos:
+#   1. Repositorio privado en GitHub CREADO
+#   2. Carpeta en Google Drive CREADA (ID obtenido)
+#   3. setup/gdrive-credentials.json (descargado de GCloud)
+#
+# Uso:
+#   export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/setup/gdrive-credentials.json
+#   make setup SETUP_CFG=setup/gdrive-remote.yaml
+#   make check-setup
+#
+# ============================================================
+
+# ------------------------------------------------------------
+# GIT — Control de versiones del código (REMOTO)
+# ------------------------------------------------------------
+git:
+  mode: custom
+  remote_url: https://github.com/STRAST-UPM/MLOps4OFP-APSE.git
+
+
+# ------------------------------------------------------------
+# DVC — Backend de almacenamiento (GOOGLE DRIVE)
+# ============================================================
+dvc:
+  backend: gdrive
+  # Google Drive folder ID donde DVC almacenará los datos.
+  # La autenticación se hará automáticamente usando:
+  #   export GOOGLE_APPLICATION_CREDENTIALS=setup/gdrive-credentials.json
+  path: "1W2Qh8M-Yvt-Qt5fGl7DP0AljAqQHVdIQ"
+
+
+# ------------------------------------------------------------
+# MLFLOW — Tracking de experimentos (DAGSHUB)
+# ============================================================
+mlflow:
+  enabled: true
+  backend: dagshub
+  tracking_uri: https://dagshub.com/mlops4ofp/mlops4ofp-apse.mlflow
+
+
+# ============================================================
+# PASOS PARA PROBAR REMOTO CON GOOGLE DRIVE
+# ============================================================
+#
+# ⚠️  LIMITACIÓN ACTUAL:
+#   PyDrive2 (librería que usa DVC para Google Drive) intenta
+#   OAuth interactivo incluso con service account JSON.
+#   Esto está en investigación.
+#
+# SOLUCIÓN TEMPORAL: Usar setup/local.yaml en lugar de este
+#
+# ============================================================
+# ALTERNATIVA 1: Local (RECOMENDADO PARA AHORA)
+# ============================================================
+#
+#   make setup SETUP_CFG=setup/local.yaml
+#   make check-setup
+#
+# Ventajas:
+#   ✓ No requiere credenciales
+#   ✓ Rápido (filesystem local)
+#   ✓ Offline-first
+#
+# ============================================================
+# ALTERNATIVA 2: Google Drive (EXPERIMENTAL)
+# ============================================================
+#
+# Si quieres probar Google Drive de todas formas:
+#
+# 1. Asegúrate de tener setup/gdrive-credentials.json
+#    (descargado desde GCloud Console → Service Accounts)
+#
+# 2. Configura la variable de entorno:
+#    export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/setup/gdrive-credentials.json
+#
+# 3. Ejecuta setup:
+#    make clean-setup
+#    make setup SETUP_CFG=setup/gdrive-remote.yaml
+#    make check-setup
+#
+# 4. Crea una variante:
+#    make variant1 VARIANT=v002 RAW=data/01-raw/01_explore_raw_raw.csv
+#
+# 5. Ejecuta notebook y script:
+#    make nb1-run VARIANT=v002
+#    make script1-run VARIANT=v002
+#
+# 6. Intenta publicar:
+#    make publish1 VARIANT=v002
+#
+#   ⚠️  Si se abre un browser con OAuth:
+#       - Cancel la ventana del browser
+#       - Vuelve a setup/local.yaml
+#       - O contacta al admin para configurar Google Drive correctamente
+#
+# ============================================================

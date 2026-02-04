@@ -1,10 +1,9 @@
 dvc:
-  backend: gdrive
-  path: 1W2Qh8M-Yvt-Qt5fGl7DP0AljAqQHVdIQ
+  backend: local
+  path: ./.dvc_storage
 git:
-  mode: custom
-  remote_url: https://github.com/STRAST-UPM/MLOps4OFP-APSE.git
+  mode: none
 mlflow:
-  backend: dagshub
+  backend: local
   enabled: true
-  tracking_uri: https://dagshub.com/mlops4ofp/mlops4ofp-apse.mlflow
+  tracking_uri: file:./mlruns
