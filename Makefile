@@ -98,6 +98,15 @@ script-run-generic: check-variant-format
 	@echo "==> Ejecutando script FASE $(PHASE) para variante $(VARIANT)"
 	$(PYTHON) $(SCRIPT) --variant $(VARIANT)
 
+
+############################################
+# VARIANT GENERIC (crea la variante en disco y registra)
+############################################
+variant-generic: check-variant-format
+	@echo "==> Creando variante $(PHASE):$(VARIANT)"
+	@$(PYTHON) mlops4ofp/tools/params_manager.py create-variant --phase $(PHASE) --variant $(VARIANT) $(if $(RAW),--raw $(RAW)) $(EXTRA_SET_FLAGS)
+	@echo "==> Variante creada: $(PHASE):$(VARIANT)"
+
 publish-generic: check-variant-format
 	@echo "==> Validando variante $(PHASE):$(VARIANT)"
 	$(PYTHON) mlops4ofp/tools/traceability.py validate-variant --phase $(PHASE) --variant $(VARIANT)
