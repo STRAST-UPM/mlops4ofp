@@ -78,7 +78,7 @@ execution_dir = Path.cwd()
 
 variant_root = (
     PROJECT_ROOT
-    / "params"
+    / "executions"
     / PHASE
     / ACTIVE_VARIANT
 )
@@ -137,7 +137,7 @@ print(f"[prepareeventsds] nan_handling = {nan_handling}")
 # --- Cargar metadata de la fase padre ---
 parent_metadata_path = (
     PROJECT_ROOT
-    / "params"
+    / "executions"
     / parent_phase
     / parent_variant
     / f"{parent_phase}_metadata.json"

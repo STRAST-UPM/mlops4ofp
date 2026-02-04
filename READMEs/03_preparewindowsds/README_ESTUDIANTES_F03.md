@@ -1,47 +1,82 @@
 # README — Estudiantes
 Fase 03 · PrepareWindowsDS
 
-## Objetivo
-En esta fase se transforma el dataset de eventos (F02) en un dataset de ventanas temporales (F03),
-que servirá como entrada para el entrenamiento de modelos.
+## ¿Qué es esta fase?
 
-Cada fila representa una ventana OW / LT / PW expresada como índices sobre el dataset F02.
+En esta fase se construye el **dataset final** que usarás para entrenar modelos.
 
-## Requisitos previos
-- Fase 01 y Fase 02 completadas
-- Python 3.10+
-- Entorno virtual activado
-- Proyecto clonado e instalado
+Cada fila del dataset corresponde a **una ventana temporal**
+y contiene únicamente los eventos:
+- observados en el pasado,
+- ocurridos después.
 
-## Flujo de trabajo
+No hay tiempos ni índices: solo eventos.
 
-### 1. Crear variante
-```bash
-make variant3 VARIANT=v001
+---
+
+## Estructura del dataset
+
+El dataset contiene **dos columnas**:
+
+| Columna   | Contenido |
+|-----------|-----------|
+| OW_events | Lista de eventos observados |
+| PW_events | Lista de eventos a predecir |
+
+Ejemplo de una fila:
+
+```
+OW_events = [12, 3, 45, 3, 18]
+PW_events = [7, 9]
 ```
 
-Editar:
-params/03_preparewindowsds/v001/params.yaml
+Los números son **códigos de evento**.
 
-### 2. Ejecutar script
-```bash
-make script3-run VARIANT=v001
+---
+
+## Cómo cargar el dataset
+
+```python
+import pandas as pd
+
+df = pd.read_parquet("03_preparewindowsds_dataset.parquet")
 ```
 
-## Resultados esperados
-En:
-params/03_preparewindowsds/v001/
+Después podrás acceder a:
 
-- 03_preparewindowsds_dataset.parquet
-- 03_preparewindowsds_metadata.json
-- 03_preparewindowsds_stats.json
-- 03_preparewindowsds_report.html
-- figures/
+```python
+df["OW_events"]
+df["PW_events"]
+```
 
-## Qué no hacer
-- No modificar el script
-- No cambiar el schema
-- No cargar el dataset completo en memoria
+---
 
-## Evaluación
-Se evaluará la correcta ejecución, coherencia de parámetros y reproducibilidad.
+## Cómo usarlo en ML
+
+- `OW_events` → entrada del modelo
+- `PW_events` → salida / etiqueta
+
+Cada fila es un ejemplo independiente.
+
+---
+
+## Cosas importantes a tener en cuenta
+
+- Las listas pueden tener longitudes distintas.
+- No todos los eventos aparecen en todas las ventanas.
+- Los códigos de evento no son consecutivos.
+
+El significado de cada código está en el catálogo de eventos de F02.
+
+---
+
+## Advertencia
+
+Si el dataset contiene columnas como:
+
+```
+t0, i_ow_0, i_pw_1, ...
+```
+
+entonces **no es el dataset correcto**
+y la fase no se ha ejecutado correctamente.

@@ -61,7 +61,7 @@ def ensure_variant_dirs(paths: dict) -> None:
 #     """
 #     Devuelve la carpeta de la variante ya creada por Makefile / params_manager.
 #     """
-#     return project_root / "params" / phase / variant
+#     return project_root / "executions" / phase / variant
 # 
 # def validate_variant_root(variant_root: Path) -> None:
 #     """

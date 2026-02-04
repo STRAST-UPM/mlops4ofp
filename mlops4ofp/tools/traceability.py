@@ -1,5 +1,7 @@
 import json
 import subprocess
+import argparse
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict, Any
@@ -47,8 +49,8 @@ def _git_info() -> Dict[str, Any]:
 # ============================================================
 
 def load_variants_for_phase(phase: str) -> Dict[str, Any]:
-    """Carga params/<phase>/variants.yaml."""
-    reg = Path(f"params/{phase}/variants.yaml")
+    """Carga executions/<phase>/variants.yaml."""
+    reg = Path(f"executions/{phase}/variants.yaml")
     if not reg.exists():
         return {"variants": {}}
     with reg.open("r", encoding="utf-8") as f:
@@ -65,7 +67,7 @@ def load_all_variants() -> Dict[str, Dict[str, Any]]:
       }
     """
     phases = []
-    pdir = Path("params")
+    pdir = Path("executions")
     if not pdir.exists():
         return {}
 
@@ -89,7 +91,7 @@ def validate_variant_exists(phase: str, variant: str):
     if variant not in reg["variants"]:
         raise ValueError(
             f"La variante {variant} no existe en la fase {phase}.\n"
-            f"Archivo: params/{phase}/variants.yaml"
+            f"Archivo: executions/{phase}/variants.yaml"
         )
     return True
 
@@ -257,4 +259,62 @@ def validate_metadata_file(metadata_path: str, schema_path: str) -> List[str]:
     schema = load_schema(schema_path)
     return validate_metadata(metadata, schema)
 
+
+# ============================================================
+# CLI (ARGPARSE)
+# ============================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Herramientas de trazabilidad para MLOps4OFP"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Comando a ejecutar")
+
+    # Subcomando: can-delete
+    can_delete_parser = subparsers.add_parser(
+        "can-delete",
+        help="Verifica si una variante puede ser eliminada (sin hijos)"
+    )
+    can_delete_parser.add_argument("--phase", required=True, help="Fase (ej: 01_explore)")
+    can_delete_parser.add_argument("--variant", required=True, help="Variante (ej: v001)")
+
+    # Subcomando: validate-variant
+    validate_parser = subparsers.add_parser(
+        "validate-variant",
+        help="Valida que una variante existe"
+    )
+    validate_parser.add_argument("--phase", required=True, help="Fase (ej: 01_explore)")
+    validate_parser.add_argument("--variant", required=True, help="Variante (ej: v001)")
+
+    # Subcomando: show-lineage
+    lineage_parser = subparsers.add_parser(
+        "show-lineage",
+        help="Muestra la cadena de ancestros de una variante"
+    )
+    lineage_parser.add_argument("--phase", required=True, help="Fase (ej: 02_prepareeventsds)")
+    lineage_parser.add_argument("--variant", required=True, help="Variante (ej: v002)")
+
+    args = parser.parse_args()
+
+    try:
+        if args.command == "can-delete":
+            can_delete_variant(args.phase, args.variant)
+            sys.exit(0)
+        elif args.command == "validate-variant":
+            validate_variant_exists(args.phase, args.variant)
+            print(f"[OK] La variante {args.phase}:{args.variant} existe.")
+            sys.exit(0)
+        elif args.command == "show-lineage":
+            show_lineage(args.phase, args.variant)
+            sys.exit(0)
+        else:
+            parser.print_help()
+            sys.exit(1)
+    except Exception as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
 

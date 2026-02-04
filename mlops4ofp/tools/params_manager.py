@@ -199,7 +199,7 @@ class ParamsManager:
 
     def __init__(self, phase_name: str, project_root: Path):
         self.phase = phase_name
-        self.phase_dir = project_root / "params" / phase_name
+        self.phase_dir = project_root / "executions" / phase_name
         self.base_params_file = self.phase_dir / "base_params.yaml"
         self.variants_registry_file = self.phase_dir / "variants.yaml"
 

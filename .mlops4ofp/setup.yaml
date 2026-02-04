@@ -1,0 +1,9 @@
+dvc:
+  backend: local
+  path: ./.dvc_storage
+git:
+  mode: none
+mlflow:
+  backend: local
+  enabled: true
+  tracking_uri: file:./mlruns

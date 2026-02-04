@@ -42,38 +42,6 @@ fields:
     type: string
     required: false
 
-
-# ============================================================
-# Reglas por FASE (solo aplican cuando la metadata es de script/notebook,
-# NO se aplican a metadata de variante)
-# ============================================================
-
-# phase_rules:
-#   "01_explore":
-#     required_inputs:
-#       - "data/01-raw"
-#     required_outputs:
-#       - "data/02-interim/01_dataset_explored.parquet"
-#
-#   "02_prepareeventsds":
-#     required_inputs:
-#       - "data/02-interim/01_dataset_explored.parquet"
-#
-#     required_outputs:
-#       - "data/02-interim/02_events_dataset.parquet"
-#       - "outputs/interim/02_events_dataset.parquet"
-#       - "outputs/metadata/02_event_dict.json"
-#       - "outputs/metadata/02_minmax_stats.json"
-#       - "outputs/reports/02_events_summary.html"
-#
-#   "03_preparewindowsds":
-#     required_inputs:
-#       - "params/02_prepareeventsds"   # carpeta de la variante anterior
-#     required_outputs:
-#       - "params/03_preparewindowsds"  # carpeta con los resultados de la fase 03
-
-
-
 # ============================================================
 # REGLAS DE PARÁMETROS POR FASE
 # ============================================================
