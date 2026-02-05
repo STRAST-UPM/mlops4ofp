@@ -1,5 +1,0 @@
-cleaning_strategy: none
-error_values_by_column: {}
-nan_values:
-- -999999
-raw_dataset_path: data/raw.csv
