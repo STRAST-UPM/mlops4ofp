@@ -18,10 +18,9 @@ Enlaces a los README de cada fase y documentación relacionada.
   - Dataset listo para modelos predictivos
 
 ## Documentación adicional
-- **Setup del proyecto**: [setup/README-setup.md](READMEs/README-setup.md)
+- **Setup del proyecto**: [READMEs/README-setup.md](READMEs/README-setup.md)
   - Configuración inicial del entorno virtual y dependencias
 
 ## Notas importantes
-- `dvc.yaml` ha sido movido a `legacy/dvc.yaml` porque la configuración actual no coincide con las rutas de los scripts del repositorio.
 - El pipeline sigue un modelo de **variantes**: cada fase puede tener múltiples variantes identificadas como `vNNN`, permitiendo experimentación controlada.
 - Las variantes de una fase dependen de variantes padre de la fase anterior (ej.: F02 padre F01).
