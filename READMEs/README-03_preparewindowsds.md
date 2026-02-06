@@ -39,7 +39,7 @@ Resumen de los objetivos más usados:
   - `LT`: lag temporal (delay) entre ventana de observación y predicción en segundos (ej.: `300`).
   - `PW`: tamaño de la ventana de predicción en segundos (ej.: `600`).
   - `WS`: estrategia de alineación (`synchro`, `asynOW`, `withinPW`, `asynPW`, etc.).
-  - `NAN`: manejo de NaN (`preserve` o `discard`).
+  - `NAN`: manejo de pares de ventanas que contienen NaN (`preserve` o `discard`).
 
 - `make nb3-run VARIANT=vNNN`
   - Ejecuta `notebooks/03_preparewindowsds.ipynb` in-place con `ACTIVE_VARIANT=VARIANT`.

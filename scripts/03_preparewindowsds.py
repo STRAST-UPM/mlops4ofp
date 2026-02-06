@@ -2,11 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-Fase 03 — prepareWindowsDS
+Fase 03 — prepareWindowsDS (OPTIMIZADA)
 
 Genera el dataset FINAL de ventanas:
 - OW_events: lista de códigos de eventos en la ventana de observación
 - PW_events: lista de códigos de eventos en la ventana de predicción
+
+Optimizada para datasets grandes:
+- Lectura selectiva de columnas
+- Aplanado + NaN en una sola pasada
+- Escritura Parquet por batches grandes
+- Fast-path O(N+W) para estrategia synchro (sin bisect por ventana)
 """
 
 # =====================================================================
@@ -72,6 +78,8 @@ def main():
     execution_dir = detect_execution_dir()
     project_root = detect_project_root(execution_dir)
 
+    print(f"[F03] inicio main | phase={PHASE} variant={args.variant}", flush=True)
+
     variant_root = (
         project_root
         / "executions"
@@ -96,29 +104,29 @@ def main():
     OW = int(params["OW"])
     LT = int(params["LT"])
     PW = int(params["PW"])
+    Tu_raw = params.get("Tu", None)
+    Tu = float(Tu_raw) if Tu_raw is not None else 0.0
     nan_strategy = params.get("nan_strategy", "discard")
     window_strategy = params.get("window_strategy", "synchro")
     parent_variant = params["parent_variant"]
     parent_phase = params.get("parent_phase", "02_prepareeventsds")
+    BATCH = int(params.get("batch_size", 10_000))  # OPT
 
     # -----------------------------------------------------------------
-    # Cargar metadata F02 para Tu
+    # Resolver Tu desde metadata F02 si no viene fijado
     # -----------------------------------------------------------------
-    with open(
-        project_root
-        / "executions"
-        / parent_phase
-        / parent_variant
-        / f"{parent_phase}_metadata.json",
-        "r",
-        encoding="utf-8",
-    ) as f:
-        meta_f02 = json.load(f)
+    if Tu_raw is None or Tu == 0:
+        with open(
+            project_root
+            / "executions"
+            / parent_phase
+            / parent_variant
+            / f"{parent_phase}_metadata.json",
+            "r",
+            encoding="utf-8",
+        ) as f:
+            meta_f02 = json.load(f)
 
-    Tu_raw = params.get("Tu", None)
-    if Tu_raw is not None:
-        Tu = float(Tu_raw)
-    else:
         Tu_f02 = meta_f02.get("Tu", None)
         if Tu_f02 is None:
             raise RuntimeError(
@@ -126,9 +134,10 @@ def main():
             )
         Tu = float(Tu_f02)
 
+    print(f"[F03] Tu = {Tu}", flush=True)
 
     # -----------------------------------------------------------------
-    # Cargar dataset F02
+    # Cargar dataset F02 (OPT: solo columnas necesarias)
     # -----------------------------------------------------------------
     input_dataset = (
         project_root
@@ -138,23 +147,22 @@ def main():
         / f"{parent_phase}_dataset.parquet"
     )
 
-    df = pq.read_table(input_dataset).to_pandas(
-        split_blocks=True,
-        self_destruct=True,
-    )
-
-    if not df["segs"].is_monotonic_increasing:
-        df = df.sort_values("segs", kind="mergesort").reset_index(drop=True)
-
-    times = df["segs"].to_numpy(dtype=np.int64, copy=False)
-    events = df["events"].to_numpy()
-    has_event = np.array(
-        [len(evs) > 0 for evs in events],
-        dtype=bool,
-    )
+    print(f"[F03] leyendo dataset F02: {input_dataset}", flush=True)
+    t_read = perf_counter()
+    table = pq.read_table(input_dataset, columns=["segs", "events"])
+    df = table.to_pandas(split_blocks=True, self_destruct=True)
+    print(f"[F03] dataset cargado en {perf_counter() - t_read:,.1f}s", flush=True)
 
     # -----------------------------------------------------------------
-    # Cargar catálogo NaN
+    # Asegurar orden temporal
+    # -----------------------------------------------------------------
+    if not df["segs"].is_monotonic_increasing:
+        t_sort = perf_counter()
+        df = df.sort_values("segs", kind="mergesort").reset_index(drop=True)
+        print(f"[F03] ordenado en {perf_counter() - t_sort:,.1f}s", flush=True)
+
+    # -----------------------------------------------------------------
+    # Leer catálogo NaN (antes de aplanar)
     # -----------------------------------------------------------------
     with open(
         project_root
@@ -172,118 +180,180 @@ def main():
         if name.endswith("_NaN_NaN")
     }
 
-    has_nan = np.array(
-        [
-            any(ev in nan_codes for ev in evs)
-            for evs in events
-        ],
-        dtype=bool,
+    # -----------------------------------------------------------------
+    # Preparar arrays (OPT: una sola pasada Python)
+    # -----------------------------------------------------------------
+    print("[F03] preparando arrays...", flush=True)
+    t_arr = perf_counter()
+
+    times = df["segs"].to_numpy(dtype=np.int64, copy=False)
+    events = df["events"].to_numpy()
+
+    lengths = np.fromiter((len(evs) for evs in events), dtype=np.int64, count=len(events))
+    offsets = np.empty(len(events) + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+
+    total_events = int(offsets[-1])
+    events_flat = np.empty(total_events, dtype=np.int32)
+
+    if nan_strategy == "discard":
+        has_nan = np.zeros(len(events), dtype=bool)
+    else:
+        has_nan = None
+
+    pos = 0
+    for i, evs in enumerate(events):
+        l = len(evs)
+        if l:
+            events_flat[pos:pos + l] = evs
+            if nan_strategy == "discard":
+                for ev in evs:
+                    if ev in nan_codes:
+                        has_nan[i] = True
+                        break
+            pos += l
+
+    if nan_strategy == "discard":
+        nan_prefix = np.cumsum(has_nan, dtype=np.int64)
+    else:
+        nan_prefix = None
+
+    print(
+        f"[F03] arrays listos en {perf_counter() - t_arr:,.1f}s | "
+        f"eventos totales: {total_events:,}",
+        flush=True,
     )
 
     # -----------------------------------------------------------------
     # Ventanas
     # -----------------------------------------------------------------
-    OW_end = OW
-    PW_start = OW + LT
-    PW_end = OW + LT + PW
+    OW_span = OW * Tu
+    PW_start = (OW + LT) * Tu
+    PW_span = PW * Tu
+    total_span = PW_start + PW_span
 
-    def window_start_iterator():
-        t_min = times[0]
-        t_max = times[-1]
-        total = PW_end * Tu
-
-        if window_strategy == "synchro":
-            t = t_min
-            while t + total <= t_max:
-                yield t
-                t += Tu
-        elif window_strategy == "asynOW":
-            event_bins = np.unique(
-                ((times[has_event] - t_min) // Tu).astype(np.int64)
-            )
-            for bin_idx in event_bins:
-                t = t_min + bin_idx * Tu
-                if t + total <= t_max:
-                    yield t
-        else:
-            raise ValueError("Estrategia no soportada")
-
-    def idx_range(t0, t1):
-        return bisect_left(times, t0), bisect_left(times, t1)
-
-    # -----------------------------------------------------------------
-    # Escritura Parquet FINAL
-    # -----------------------------------------------------------------
     output_path = variant_root / f"{PHASE}_dataset.parquet"
-
     schema = pa.schema([
         ("OW_events", pa.list_(pa.int32())),
         ("PW_events", pa.list_(pa.int32())),
     ])
-
     writer = pq.ParquetWriter(output_path, schema, compression="snappy")
 
-    BATCH = 10_000
     rows = []
+    rows_append = rows.append
+    offsets_l = offsets
+    events_flat_l = events_flat
 
     windows_total = 0
     windows_written = 0
-    LOG_EVERY = 100_000
-    t_start = perf_counter()
 
-    for t0 in window_start_iterator():
-        windows_total += 1
+    t_loop = perf_counter()
 
-        i_ow_0, i_ow_1 = idx_range(t0, t0 + OW * Tu)
-        i_pw_0, i_pw_1 = idx_range(
-            t0 + PW_start * Tu,
-            t0 + PW_end * Tu,
-        )
+    # =================================================================
+    # FAST PATH: SYNCHRO (OPT: sin bisect por ventana)
+    # =================================================================
+    if window_strategy == "synchro":
+        n = len(times)
+        t0 = times[0]
 
-        if i_ow_0 == i_ow_1 or i_pw_0 == i_pw_1:
-            continue
+        i_ow_0 = bisect_left(times, t0)
+        i_ow_1 = bisect_left(times, t0 + OW_span)
+        i_pw_0 = bisect_left(times, t0 + PW_start)
+        i_pw_1 = bisect_left(times, t0 + PW_start + PW_span)
 
-        if nan_strategy == "discard":
-            if has_nan[i_ow_0:i_ow_1].any():
-                continue
-            if has_nan[i_pw_0:i_pw_1].any():
-                continue
+        while t0 + total_span <= times[-1]:
+            windows_total += 1
 
-        ow_events = [
-            ev for evs in events[i_ow_0:i_ow_1] for ev in evs
-        ]
-        pw_events = [
-            ev for evs in events[i_pw_0:i_pw_1] for ev in evs
-        ]
+            if i_ow_0 != i_ow_1 or i_pw_0 != i_pw_1:
+                if nan_strategy == "discard":
+                    if (
+                        (i_ow_0 < i_ow_1 and
+                         nan_prefix[i_ow_1 - 1] - (nan_prefix[i_ow_0 - 1] if i_ow_0 else 0) > 0)
+                        or
+                        (i_pw_0 < i_pw_1 and
+                         nan_prefix[i_pw_1 - 1] - (nan_prefix[i_pw_0 - 1] if i_pw_0 else 0) > 0)
+                    ):
+                        pass
+                    else:
+                        ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
+                        pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
+                        rows_append({"OW_events": ow_events, "PW_events": pw_events})
+                        windows_written += 1
+                else:
+                    ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
+                    pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
+                    rows_append({"OW_events": ow_events, "PW_events": pw_events})
+                    windows_written += 1
 
-        rows.append({
-            "OW_events": ow_events,
-            "PW_events": pw_events,
-        })
+            if len(rows) >= BATCH:
+                writer.write_table(pa.Table.from_pylist(rows, schema))
+                rows.clear()
 
-        windows_written += 1
+            t0 += Tu
+            ow_start = t0
+            ow_end = t0 + OW_span
+            pw_start = t0 + PW_start
+            pw_end = pw_start + PW_span
 
-        if windows_total % LOG_EVERY == 0:
-            elapsed = perf_counter() - t_start
-            print(
-                f"[F03] ventanas procesadas: {windows_total:,} | "
-                f"escritas: {windows_written:,} | "
-                f"tiempo: {elapsed:,.1f}s"
-            )
+            while i_ow_0 < n and times[i_ow_0] < ow_start:
+                i_ow_0 += 1
+            while i_ow_1 < n and times[i_ow_1] < ow_end:
+                i_ow_1 += 1
+            while i_pw_0 < n and times[i_pw_0] < pw_start:
+                i_pw_0 += 1
+            while i_pw_1 < n and times[i_pw_1] < pw_end:
+                i_pw_1 += 1
 
-        if len(rows) >= BATCH:
-            writer.write_table(pa.Table.from_pylist(rows, schema))
-            rows.clear()
+    # =================================================================
+    # FALLBACK: otras estrategias (mantiene bisect)
+    # =================================================================
+    else:
+        def idx_range(t0, t1):
+            return bisect_left(times, t0), bisect_left(times, t1)
+
+        t0 = times[0]
+        while t0 + total_span <= times[-1]:
+            windows_total += 1
+
+            i_ow_0, i_ow_1 = idx_range(t0, t0 + OW_span)
+            i_pw_0, i_pw_1 = idx_range(t0 + PW_start, t0 + PW_start + PW_span)
+
+            if i_ow_0 != i_ow_1 or i_pw_0 != i_pw_1:
+                if nan_strategy == "discard":
+                    if (
+                        (i_ow_0 < i_ow_1 and
+                         nan_prefix[i_ow_1 - 1] - (nan_prefix[i_ow_0 - 1] if i_ow_0 else 0) > 0)
+                        or
+                        (i_pw_0 < i_pw_1 and
+                         nan_prefix[i_pw_1 - 1] - (nan_prefix[i_pw_0 - 1] if i_pw_0 else 0) > 0)
+                    ):
+                        pass
+                    else:
+                        ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
+                        pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
+                        rows_append({"OW_events": ow_events, "PW_events": pw_events})
+                        windows_written += 1
+                else:
+                    ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
+                    pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
+                    rows_append({"OW_events": ow_events, "PW_events": pw_events})
+                    windows_written += 1
+
+            if len(rows) >= BATCH:
+                writer.write_table(pa.Table.from_pylist(rows, schema))
+                rows.clear()
+
+            t0 += Tu
 
     if rows:
         writer.write_table(pa.Table.from_pylist(rows, schema))
-
     writer.close()
 
-    elapsed_total = perf_counter() - t_start
+    elapsed = perf_counter() - t_loop
 
     # -----------------------------------------------------------------
-    # Metadata mínima
+    # Metadata
     # -----------------------------------------------------------------
     metadata = {
         "phase": PHASE,
@@ -295,7 +365,7 @@ def main():
         "PW": PW,
         "windows_total": windows_total,
         "windows_written": windows_written,
-        "elapsed_seconds": round(elapsed_total, 3),
+        "elapsed_seconds": round(elapsed, 3),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -305,9 +375,9 @@ def main():
     print("✔ F03 FINAL generado")
     print(f"  Dataset : {output_path}")
     print(f"  Ventanas: {windows_written:,}")
-    print(f"  Tiempo  : {elapsed_total:,.1f}s")
+    print(f"  Tiempo  : {elapsed:,.1f}s")
+
 
 # =====================================================================
 if __name__ == "__main__":
     main()
-
