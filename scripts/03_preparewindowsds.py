@@ -18,6 +18,7 @@ import argparse
 import json
 from bisect import bisect_left
 from datetime import datetime, timezone
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
@@ -147,6 +148,10 @@ def main():
 
     times = df["segs"].to_numpy(dtype=np.int64, copy=False)
     events = df["events"].to_numpy()
+    has_event = np.array(
+        [len(evs) > 0 for evs in events],
+        dtype=bool,
+    )
 
     # -----------------------------------------------------------------
     # Cargar catálogo NaN
@@ -192,6 +197,14 @@ def main():
             while t + total <= t_max:
                 yield t
                 t += Tu
+        elif window_strategy == "asynOW":
+            event_bins = np.unique(
+                ((times[has_event] - t_min) // Tu).astype(np.int64)
+            )
+            for bin_idx in event_bins:
+                t = t_min + bin_idx * Tu
+                if t + total <= t_max:
+                    yield t
         else:
             raise ValueError("Estrategia no soportada")
 
@@ -215,6 +228,8 @@ def main():
 
     windows_total = 0
     windows_written = 0
+    LOG_EVERY = 100_000
+    t_start = perf_counter()
 
     for t0 in window_start_iterator():
         windows_total += 1
@@ -248,6 +263,14 @@ def main():
 
         windows_written += 1
 
+        if windows_total % LOG_EVERY == 0:
+            elapsed = perf_counter() - t_start
+            print(
+                f"[F03] ventanas procesadas: {windows_total:,} | "
+                f"escritas: {windows_written:,} | "
+                f"tiempo: {elapsed:,.1f}s"
+            )
+
         if len(rows) >= BATCH:
             writer.write_table(pa.Table.from_pylist(rows, schema))
             rows.clear()
@@ -256,6 +279,8 @@ def main():
         writer.write_table(pa.Table.from_pylist(rows, schema))
 
     writer.close()
+
+    elapsed_total = perf_counter() - t_start
 
     # -----------------------------------------------------------------
     # Metadata mínima
@@ -270,6 +295,7 @@ def main():
         "PW": PW,
         "windows_total": windows_total,
         "windows_written": windows_written,
+        "elapsed_seconds": round(elapsed_total, 3),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -279,6 +305,7 @@ def main():
     print("✔ F03 FINAL generado")
     print(f"  Dataset : {output_path}")
     print(f"  Ventanas: {windows_written:,}")
+    print(f"  Tiempo  : {elapsed_total:,.1f}s")
 
 # =====================================================================
 if __name__ == "__main__":

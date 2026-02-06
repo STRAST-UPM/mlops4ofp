@@ -1,0 +1,8 @@
+Tu: null
+band_thresholds_pct:
+- 40
+- 60
+- 90
+event_strategy: both
+nan_handling: keep
+parent_variant: v901
