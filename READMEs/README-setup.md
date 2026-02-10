@@ -1,127 +1,165 @@
 # ============================================================
-# MLOps4OFP — Guía de configuraciones de setup
+# MLOps4OFP - Guia de configuraciones de setup
 # ============================================================
 
-Esta guía describe **cómo inicializar y validar el entorno de trabajo del proyecto MLOps4OFP** de forma reproducible, multiplataforma y sin pasos manuales ocultos.
+Esta guia describe como inicializar y validar el entorno de trabajo del proyecto
+MLOps4OFP de forma reproducible y sin pasos manuales ocultos.
 
-El setup está diseñado para:
+El setup esta pensado para:
 - desarrollo local
 - docencia
 - trabajo en equipo
 - CI/CD
 
-El proceso de setup **se ejecuta una sola vez por copia del repositorio**.
+El proceso de setup se ejecuta una sola vez por copia del repositorio.
 
 ---
 
-## Requisito obligatorio: versión de Python
+## Requisito obligatorio: version de Python
 
-⚠️ **Este proyecto requiere una versión concreta de Python.**  
-El setup **no funcionará** con versiones no soportadas.
+Este proyecto requiere una version concreta de Python.
+El setup no funciona con versiones no soportadas.
 
-### Versiones soportadas
-- ✅ **Python 3.10**
-- ✅ **Python 3.11**
+Versiones soportadas:
+- Python 3.10
+- Python 3.11
 
-### Versiones NO soportadas
-- ❌ Python 3.12
-- ❌ Python 3.13 o superior
-- ❌ Python 3.9 o inferior
+Versiones NO soportadas:
+- Python 3.12 o superior
+- Python 3.9 o inferior
 
-**Motivo**  
-El pipeline utiliza TensorFlow y librerías científicas que **no son estables** en Python ≥3.12 a día de hoy.  
-Usar versiones no soportadas puede provocar:
-- cuelgues silenciosos
-- bloqueos durante el entrenamiento
-- comportamiento no determinista
+Motivo:
+El pipeline usa TensorFlow y librerias cientificas no estables en Python >= 3.12.
 
-El script `setup.py` **verifica automáticamente** la versión de Python y aborta con un mensaje claro si no es compatible.
+El script setup/setup.py valida la version de Python y aborta si no es compatible.
 
-### Comprobar tu versión de Python
-
-```bash
+### Comprobar tu version
 python --version
-```
-
-Debe mostrar algo como:
-
-```
-Python 3.10.x
-```
-o
-```
-Python 3.11.x
-```
 
 ### Instalar Python 3.11 (si no lo tienes)
 
-#### macOS (Homebrew)
-```bash
+macOS (Homebrew):
 brew install python@3.11
-```
 
-Ejecuta el setup con:
-```bash
-python3.11 setup.py -c setup/local.yaml
-```
-
-#### Ubuntu / Debian
-```bash
+Ubuntu / Debian:
 sudo apt update
 sudo apt install python3.11 python3.11-venv
-```
 
-Ejecuta el setup con:
-```bash
-python3.11 setup.py -c setup/local.yaml
-```
-
-#### Windows
-1. Descarga Python 3.11 desde: https://www.python.org/downloads/
-2. Marca la opción **“Add Python to PATH”** durante la instalación
-3. Ejecuta:
-```bat
-python setup.py -c setup\local.yaml
-```
+Windows:
+- Descarga Python 3.11 desde https://www.python.org/downloads/
+- Activa "Add Python to PATH" en la instalacion
 
 ---
 
-## Nota importante sobre el entorno virtual
+## Entorno virtual (.venv)
 
-- El entorno virtual `.venv` **se crea automáticamente** durante `make setup`.
-- El usuario **NO debe crear ni activar** el entorno virtual manualmente.
-- El Makefile está preparado para usar `.venv` internamente.
-- La versión de Python **se decide antes** de crear el entorno virtual.
+- .venv se crea automaticamente durante make setup.
+- No hay que crear ni activar .venv manualmente.
+- El Makefile usa .venv/bin/python3 si existe.
+- La version de Python se decide antes de crear .venv.
 
-Ejemplo correcto:
+---
+
+## Herramientas requeridas
+
+Obligatorias:
+- git
+- python (3.10 o 3.11)
+- make
+- dvc
+
+### Verificar instalacion
 ```bash
-make setup PYTHON=python3.11 SETUP_CFG=setup/local.yaml
+git --version
+python --version
+make --version
+dvc --version
 ```
+
+Instalar en macOS (homebrew)
+```bash
+brew install make
+brew install dvc
+```
+
+Instalar en Ubuntu / Debian
+```bash
+sudo apt update
+sudo apt install make
+sudo apt install dvc
+```
+
+Instalar en Windows
+- Make: instala Chocolatey y ejecuta choco install make
+- DVC: instala con pip en el Python del sistema:
+```bash
+pip install dvc
+```
+
 
 ---
 
 ## Flujos de setup disponibles
 
-### 1. LOCAL (recomendado para desarrollo y docencia)
-**Perfecto para:** desarrollo individual, testing, docencia, trabajo offline
+El setup se ejecuta con:
+make setup SETUP_CFG=setup/local.yaml
 
-```bash
+Siempre termina con:
+make check-setup
+
+### 1) LOCAL (recomendado para desarrollo y docencia)
+
 make setup SETUP_CFG=setup/local.yaml
 make check-setup
-```
 
-**Características:**
-- DVC remote: carpeta local (`~/.dvc_storage`)
-- Git: sin remote obligatorio
-- Sin autenticación
-- Rápido y reproducible
+Caracteristicas:
+- DVC remote: local en ./.dvc_storage
+- MLflow: local en file:./mlruns
+- Git: modo none (no configura remotos)
+- Sin autenticacion
+
+### 2) REMOTE (DAGsHub + Git remoto)
+
+export DAGSHUB_USER=tu_usuario
+export DAGSHUB_TOKEN=tu_token
+
+make setup SETUP_CFG=setup/remote.yaml
+make check-setup
+
+Caracteristicas:
+- DVC: DAGsHub (remote "storage")
+- MLflow: DAGsHub (tracking remoto)
+- Git: configura remote "publish" con git.remote_url
+
+Requisitos:
+- Cuenta y repo en DAGsHub
+- DAGSHUB_USER y DAGSHUB_TOKEN en el entorno
 
 ---
 
-## Nota final
+## Que genera el setup
 
-Este proyecto **no intenta “arreglar” el entorno automáticamente**.  
+- .venv/ con dependencias
+- .mlops4ofp/setup.yaml (configuracion activa)
+- .mlops4ofp/env.sh (si MLflow esta habilitado)
+
+Si existe .mlops4ofp/env.sh, el Makefile lo incluye automaticamente.
+
+---
+
+## Comandos utiles
+
+make check-setup
+make clean-setup
+
+clean-setup elimina solo .mlops4ofp (no borra .venv ni datos).
+
+---
+
+## Notas finales
+
+El proyecto no intenta "arreglar" el entorno automaticamente.
 Prefiere:
-- validaciones explícitas
+- validaciones explicitas
 - fallos tempranos
 - contratos claros
