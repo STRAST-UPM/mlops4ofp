@@ -4,6 +4,8 @@ import sys
 import shutil
 
 MIN_PYTHON = (3, 10)
+MAX_PYTHON = (3, 11)
+
 
 def run(cmd):
     try:
@@ -13,20 +15,18 @@ def run(cmd):
         return False, str(e)
 
 def check_python():
-    ok, out = run(["python3", "--version"])
-    if not ok:
-        print("❌ Python 3 no encontrado (python3)")
+    v = sys.version_info
+    if v < MIN_PYTHON or v > MAX_PYTHON:
+        print(
+            f"❌ Python {v.major}.{v.minor}.{v.micro} no soportado\n"
+            f"   Se requiere >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]} "
+            f"y <= {MAX_PYTHON[0]}.{MAX_PYTHON[1]}"
+        )
         return False
 
-    version = out.split()[-1]
-    major, minor, *_ = map(int, version.split("."))
-
-    if (major, minor) < MIN_PYTHON:
-        print(f"❌ Python {version} encontrado, se requiere >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}")
-        return False
-
-    print(f"✔ Python {version}")
+    print(f"✔ Python {v.major}.{v.minor}.{v.micro}")
     return True
+
 
 def check_tool(name, mandatory=True):
     if shutil.which(name) is None:

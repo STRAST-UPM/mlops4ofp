@@ -42,6 +42,12 @@ fields:
     type: string
     required: false
 
+  parent_variants:
+    type: list
+    element_type: string
+    required: false
+
+
 # ============================================================
 # REGLAS DE PARÁMETROS POR FASE
 # ============================================================
@@ -130,6 +136,79 @@ param_rules:
       type: string
       required: true
       regex: "^v[0-9]{3}$"
+
+  "04_targetengineering":
+
+    prediction_objective:
+      type: dict
+      required: true
+
+    parent_variant:
+      type: string
+      required: true
+      regex: "^v[0-9]{3}$"
+
+  "05_modeling":
+    _free_keys: ["search_space"]
+    parent_variant:
+      type: string
+      required: true
+      regex: "^v[0-9]{3}$"
+
+    model_family:
+      type: string
+      required: true
+      enum:
+        - sequence_embedding
+        - dense_bow
+        - cnn1d
+
+    automl:
+      type: dict
+      required: true
+
+    training:
+      type: dict
+      required: true
+
+    imbalance:
+      type: dict
+      required: true
+
+    evaluation:
+      type: dict
+      required: true
+
+    metrics:
+      type: dict
+      required: true
+
+    candidate_selection:
+      type: dict
+      required: true
+
+  "06_packaging":
+
+    parent_variants_f05:
+      type: list
+      element_type: string
+      required: true
+
+    temporal:
+      type: dict
+      required: true
+
+    models:
+      type: list
+      required: true
+
+    replay:
+      type: dict
+      required: true
+
+    notes:
+      type: string
+      required: false
 
 
   

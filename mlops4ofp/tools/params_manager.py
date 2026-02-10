@@ -77,6 +77,10 @@ def validate_params(phase: str, params: dict, project_root: Path):
     """
     Valida que los parámetros de una variante cumplen el esquema definido
     en mlops4ofp/schemas/traceability_schema.yaml → param_rules.
+
+    Soporta claves meta por fase, como:
+      _free_keys: ["search_space"]
+    que no se validan como parámetros, pero permiten claves sueltas.
     """
 
     schema_path = project_root / "mlops4ofp" / "schemas" / "traceability_schema.yaml"
@@ -85,6 +89,113 @@ def validate_params(phase: str, params: dict, project_root: Path):
 
     with open(schema_path, "r", encoding="utf-8") as f:
         schema = yaml.safe_load(f)
+
+    # -------------------------------
+    # 1) Reglas de la fase
+    # -------------------------------
+    phase_rules = schema.get("param_rules", {}).get(phase)
+    if phase_rules is None:
+        raise RuntimeError(f"No existen reglas de parámetros para la fase {phase}")
+
+    if not isinstance(phase_rules, dict):
+        raise RuntimeError(f"param_rules[{phase}] debe ser un diccionario")
+
+    # Claves meta (no corresponden a parámetros, p.ej. _free_keys)
+    free_keys = set(phase_rules.get("_free_keys", []))
+
+    # Claves de parámetros "reales" (las que sí tienen reglas)
+    param_rule_keys = {k for k in phase_rules.keys() if not k.startswith("_")}
+
+    allowed_keys = set(param_rule_keys)
+    provided_keys = set(params.keys())
+
+    # -------------------------------
+    # 2) Parámetros desconocidos
+    # -------------------------------
+    unknown_keys = provided_keys - (allowed_keys | free_keys)
+    if unknown_keys:
+        raise ValueError(
+            f"Parámetros no permitidos para fase {phase}: {sorted(unknown_keys)}\n"
+            f"Parámetros válidos: {sorted(allowed_keys)}\n"
+            f"Claves libres: {sorted(free_keys)}"
+        )
+
+    # -------------------------------
+    # 3) Validación clave por clave
+    # -------------------------------
+    for key in param_rule_keys:
+        rules = phase_rules[key]
+
+        if not isinstance(rules, dict):
+            raise RuntimeError(
+                f"Reglas de parámetro inválidas para '{key}' en fase {phase}: "
+                f"se esperaba dict, recibido {type(rules).__name__}"
+            )
+
+        # ---- Requerido ----
+        if rules.get("required", False) and key not in params:
+            raise ValueError(f"Falta parámetro obligatorio: {key}")
+
+        value = params.get(key)
+
+        # Si es opcional y no está, saltamos sin validar
+        if value is None:
+            continue
+
+        expected_type = rules.get("type")
+
+        if expected_type == "string":
+            if not isinstance(value, str):
+                raise ValueError(f"Parámetro {key} debe ser string, recibido: {type(value)}")
+
+        elif expected_type == "number":
+            if isinstance(value, str):
+                try:
+                    value = float(value) if "." in value else int(value)
+                    params[key] = value
+                except ValueError:
+                    raise ValueError(f"Parámetro {key} debe ser numérico, recibido: {value}")
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"Parámetro {key} debe ser numérico, recibido: {type(value)}")
+
+        elif expected_type == "list":
+            if not isinstance(value, list):
+                raise ValueError(f"Parámetro {key} debe ser una lista")
+            elem_type = rules.get("element_type")
+            if elem_type == "number":
+                for i, elem in enumerate(value):
+                    if not isinstance(elem, (int, float)):
+                        raise ValueError(
+                            f"Elemento inválido en {key}[{i}]: debe ser numérico, recibido {elem}"
+                        )
+
+        elif expected_type == "dict":
+            if not isinstance(value, dict):
+                raise ValueError(f"Parámetro {key} debe ser un diccionario")
+
+        else:
+            raise RuntimeError(f"Tipo desconocido en schema para {key}: {expected_type}")
+
+        # Enum
+        if "enum" in rules:
+            allowed = rules["enum"]
+            if value not in allowed:
+                raise ValueError(
+                    f"Valor inválido para {key}: '{value}'. "
+                    f"Debe ser uno de: {allowed}"
+                )
+
+    # -------------------------------
+    # 4) Validación opcional específica de F01
+    # -------------------------------
+    if phase == "01_explore" and "raw_dataset_path" in params:
+        raw_path = (project_root / params["raw_dataset_path"]).expanduser()
+        if not raw_path.exists():
+            raise ValueError(
+                f"raw_dataset_path apunta a un fichero inexistente: {raw_path}"
+            )
+
+    return True
 
     # -------------------------------
     # 1) Comprobamos que exista sección param_rules para esta fase
@@ -96,6 +207,9 @@ def validate_params(phase: str, params: dict, project_root: Path):
     allowed_keys = set(phase_rules.keys())
     provided_keys = set(params.keys())
 
+    free_keys = phase_rules.get("_free_keys", [])
+    allowed_keys = allowed_keys | set(free_keys)
+    
     # -------------------------------
     # 2) Comprobar claves desconocidas
     # -------------------------------
@@ -174,7 +288,7 @@ def validate_params(phase: str, params: dict, project_root: Path):
     # -------------------------------
     # 4) Validación opcional: raw_dataset_path debe existir
     # -------------------------------
-    if "raw_dataset_path" in params:
+    if phase == "01_explore" and "raw_dataset_path" in params:
         raw_path = (project_root / params["raw_dataset_path"]).expanduser()
         if not raw_path.exists():
             raise ValueError(
@@ -215,7 +329,13 @@ class ParamsManager:
                 yaml.safe_dump({"variants": {}}, f)
 
 
-
+    def check_metadata_exists(self):
+        vdir = self._current_variant_dir
+        meta = vdir / f"{self.phase}_metadata.json"
+        if not meta.exists():
+            raise RuntimeError(
+                f"Falta metadata obligatoria: {meta.name}"
+            )
 
     # ============================================================
     # UTILIDADES
@@ -295,7 +415,12 @@ class ParamsManager:
     # CREACIÓN DE VARIANTE
     # ============================================================
 
-    def create_named_variant(self, variant_name: str, raw_path_from_make: str = None, extra_params=None):
+    def create_named_variant(
+        self,
+        variant_name: str,
+        raw_path_from_make: str = None,
+        extra_params=None
+    ):
         """Crea una variante explícita con nombre vNNN."""
         if not re.match(r"^v[0-9]{3}$", variant_name):
             raise ValueError(f"Nombre de variante inválido: {variant_name}")
@@ -305,35 +430,54 @@ class ParamsManager:
         if variant_name in registry["variants"]:
             raise RuntimeError(f"La variante {variant_name} ya existe.")
 
+        # ---------------------------------------------------------
         # Crear carpeta de variante
+        # ---------------------------------------------------------
         variant_dir = self.phase_dir / variant_name
         variant_dir.mkdir(parents=True, exist_ok=True)
 
+        # ---------------------------------------------------------
         # Cargar params base
+        # ---------------------------------------------------------
         base_params = self.load_base_params()
 
-        # Inyectar RAW si se proporcionó
-        if raw_path_from_make:
+        # Inyectar RAW si se proporcionó (solo fases que lo usen)
+        if raw_path_from_make and self.phase != "06_packaging":
             base_params["raw_dataset_path"] = raw_path_from_make
 
+        # Inyectar parámetros extra desde --set
         if extra_params:
             extra_dict = self._parse_extra_params(extra_params)
             for k, v in extra_dict.items():
                 base_params[k] = v
 
-        # VALIDAR parámetros antes de crear la variante
+        # ---------------------------------------------------------
+        # Validar parámetros antes de crear la variante
+        # ---------------------------------------------------------
         validate_params(self.phase, base_params, PROJECT_ROOT)
 
-        # Guardar params.yaml de variante
+        # ---------------------------------------------------------
+        # Guardar params.yaml de la variante
+        # ---------------------------------------------------------
         params_path = variant_dir / "params.yaml"
         with open(params_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(base_params, f)
+            yaml.safe_dump(base_params, f, sort_keys=False)
 
-        # Registrar variante
-        registry["variants"][variant_name] = {
+        # ---------------------------------------------------------
+        # Registrar variante en variants.yaml
+        # ---------------------------------------------------------
+        entry = {
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "params_path": str(params_path)
+            "params_path": str(params_path),
         }
+
+        # Caso especial F06: linaje múltiple
+        if self.phase == "06_packaging":
+            parents = base_params.get("parent_variants_f05")
+            if parents:
+                entry["parent_variants_f05"] = list(parents)
+
+        registry["variants"][variant_name] = entry
         self._save_registry(registry)
 
         print(f"[OK] Variante creada: {variant_dir}")

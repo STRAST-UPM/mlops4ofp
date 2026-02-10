@@ -4,6 +4,28 @@ import subprocess
 from pathlib import Path
 import argparse
 
+# --------------------------------------------------
+# Requisitos de versión de Python
+# --------------------------------------------------
+
+MIN_PYTHON = (3, 10)
+MAX_PYTHON = (3, 11)  # inclusivo
+
+def check_python_version():
+    v = sys.version_info
+    if v < MIN_PYTHON or v > MAX_PYTHON:
+        abort(
+            f"Versión de Python no soportada: {v.major}.{v.minor}.{v.micro}\n"
+            f"Se requiere Python >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]} "
+            f"y <= {MAX_PYTHON[0]}.{MAX_PYTHON[1]}.\n\n"
+            "Soluciones:\n"
+            "  - macOS (Homebrew): brew install python@3.11\n"
+            "  - Ubuntu/Debian:   sudo apt install python3.11\n"
+            "  - Windows:         instalar Python 3.11 desde python.org\n"
+        )
+
+
+
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv"
 VENV_PYTHON = VENV / "bin" / "python"
@@ -218,6 +240,13 @@ def main():
     print("====================================")
     print(" MLOps4OFP — Setup del proyecto")
     print("====================================")
+
+    check_python_version()
+
+    print(
+        f"[INFO] Python {sys.version_info.major}."
+        f"{sys.version_info.minor} OK"
+    )
 
     ensure_venv()
     ensure_running_in_venv(sys.argv[1:])

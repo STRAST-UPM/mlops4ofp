@@ -1,3 +1,7 @@
+## Documentación inicial
+- **Setup del proyecto**: [READMEs/README-setup.md](READMEs/README-setup.md)
+  - Configuración inicial del entorno virtual y dependencias
+
 # Documentación de fases del pipeline
 
 Enlaces a los README de cada fase y documentación relacionada.
@@ -16,10 +20,6 @@ Enlaces a los README de cada fase y documentación relacionada.
   - Generación del dataset FINAL de ventanas temporales
   - Crea ventanas de observación y predicción materializadas
   - Dataset listo para modelos predictivos
-
-## Documentación adicional
-- **Setup del proyecto**: [READMEs/README-setup.md](READMEs/README-setup.md)
-  - Configuración inicial del entorno virtual y dependencias
 
 ## Notas importantes
 - El pipeline sigue un modelo de **variantes**: cada fase puede tener múltiples variantes identificadas como `vNNN`, permitiendo experimentación controlada.

@@ -23,6 +23,13 @@ def ok(msg):
     print(f"[OK] {msg}")
 
 
+def check_venv():
+    venv = ROOT / ".venv"
+    if not venv.exists():
+        fail(".venv no existe (setup incompleto)")
+    ok("Entorno virtual .venv presente")
+
+
 def run(cmd, check=True):
     try:
         out = subprocess.check_output(
@@ -102,12 +109,20 @@ def check_dvc(cfg):
     elif backend == "dagshub":
         cfg_local = run(["dvc", "config", "--local", "--list"], check=False)
 
-        if "remote.storage.user" not in cfg_local or "remote.storage.password" not in cfg_local:
+        if not cfg_local:
+            fail("No se pudo leer configuración local de DVC")
+
+        if (
+            "remote.storage.user" not in cfg_local
+            or "remote.storage.password" not in cfg_local
+        ):
             fail(
                 "DVC DAGsHub configurado pero faltan credenciales locales.\n"
                 "Ejecuta 'make setup' con DAGSHUB_USER y DAGSHUB_TOKEN definidos."
             )
-        else:
+
+        ok("DVC DAGsHub: credenciales locales configuradas")
+    else:
             fail(f"Backend DVC no soportado: {backend}")
 
 
@@ -139,6 +154,8 @@ def main():
     print("====================================")
     print(" CHECK-SETUP — MLOps4OFP")
     print("====================================")
+
+    check_venv()
 
     if not CFG_FILE.exists():
         fail("No existe .mlops4ofp/setup.yaml (setup no ejecutado)")

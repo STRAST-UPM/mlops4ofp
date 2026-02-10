@@ -3,6 +3,8 @@
 # (MLflow, etc.)
 ############################################
 
+PYTHON ?= python
+
 # Si existe .mlops4ofp/env.sh, se incluye automáticamente
 # y sus variables pasan a todos los comandos make.
 #
@@ -34,8 +36,8 @@ help-setup:
 	@echo "  make setup SETUP_CFG=setup/example_setup.yaml"
 	@echo "      Setup no interactivo desde fichero YAML"
 	@echo ""
-	@echo "  make setup"
-	@echo "      Toma por defecto setup/config_default.yaml"
+	@echo "  make setup SETUP_CFG=setup/example_setup.yaml"
+	@echo "      Setup no interactivo desde fichero YAML (obligatorio)"
 	@echo ""
 	@echo "  make check-setup"
 	@echo "      Verifica que el setup es válido"
@@ -50,12 +52,12 @@ setup:
 ifndef SETUP_CFG
 	$(error Debes especificar SETUP_CFG=<fichero.yaml> (ej: setup/local.yaml o setup/remote.yaml))
 endif
-	@python3 $(SETUP_PY) --config $(SETUP_CFG)
+	@$(PYTHON) $(SETUP_PY) --config $(SETUP_CFG)
 
 
 check-setup:
 	@echo "==> Verificando entorno base"
-	@python3 setup/check_env.py
+	@$(PYTHON) setup/check_env.py
 	@echo "==> Verificando configuración del proyecto"
 	@.venv/bin/python setup/check_setup.py
 
@@ -235,6 +237,37 @@ export-generic: check-variant-format
 	@echo "[OK] Export completado: $(EXPORT_DIR)/"
 
 
+remove-phase-all:
+	@echo "==> Eliminando TODAS las variantes de la fase $(PHASE) (modo SEGURO)"
+	@test -d "$(VARIANTS_DIR)" || \
+	  (echo "[INFO] No existe $(VARIANTS_DIR). Nada que borrar."; exit 0)
+
+	@for v in $$(ls $(VARIANTS_DIR) | grep '^v[0-9]\{3\}$$'); do \
+	  echo "----> Eliminando $(PHASE):$$v"; \
+	  $(MAKE) remove-generic PHASE=$(PHASE) VARIANTS_DIR=$(VARIANTS_DIR) VARIANT=$$v || exit 1; \
+	done
+
+	@echo "[OK] Fase $(PHASE) eliminada completamente (modo seguro)"
+
+define CHECK_MODELS_YAML
+python - << 'EOF'
+import sys, yaml
+try:
+    data = yaml.safe_load("""$(MODELS)""")
+    if not isinstance(data, dict) or not data:
+        raise ValueError("MODELS debe ser un diccionario no vacío")
+    for obj, models in data.items():
+        if not isinstance(models, list) or not models:
+            raise ValueError(f"El objetivo {obj} no tiene modelos válidos")
+    print("[OK] MODELS válido")
+except Exception as e:
+    print(f"[ERROR] MODELS inválido: {e}", file=sys.stderr)
+    sys.exit(1)
+EOF
+endef
+
+
+
 ##########################################
 # DVC REMOTE MANAGEMENT
 ##########################################
@@ -364,6 +397,11 @@ script1-check-dvc:
 clean1-all:
 	$(MAKE) clean-phase-generic PHASE=$(PHASE1) VARIANTS_DIR=$(VARIANTS_DIR_01)
 
+remove1-all:
+	$(MAKE) remove-phase-all PHASE=$(PHASE1) VARIANTS_DIR=$(VARIANTS_DIR_01)
+
+
+
 tag1-stage-ready:
 	git tag stage-ready-fase01
 	git push origin stage-ready-fase01
@@ -475,6 +513,9 @@ script2-check-dvc:
 
 clean2-all:
 	$(MAKE) clean-phase-generic PHASE=$(PHASE2) VARIANTS_DIR=$(VARIANTS_DIR_02)
+
+remove2-all:
+	$(MAKE) remove-phase-all PHASE=$(PHASE2) VARIANTS_DIR=$(VARIANTS_DIR_02)
 
 
 # ===========================
@@ -595,6 +636,9 @@ publish3: check-variant-format
 remove3: check-variant-format
 	$(MAKE) remove-generic PHASE=$(PHASE3) VARIANTS_DIR=$(VARIANTS_DIR_03) VARIANT=$(VARIANT)
 
+remove3-all:
+	$(MAKE) remove-phase-all PHASE=$(PHASE3) VARIANTS_DIR=$(VARIANTS_DIR_03)
+
 
 ############################################
 # 6. CHEQUEO DE RESULTADOS
@@ -678,6 +722,466 @@ help3:
 	@echo ""
 	@echo "==============================================="
 
+############################################
+# FASE 04 — TARGET ENGINEERING
+############################################
+
+PHASE4=04_targetengineering
+VARIANTS_DIR_04 = executions/$(PHASE4)
+NOTEBOOK4=notebooks/04_targetengineering.ipynb
+SCRIPT4=scripts/04_targetengineering.py
+
+
+############################################
+# 1. EJECUCIÓN DEL NOTEBOOK
+############################################
+nb4-run: check-variant-format
+	$(MAKE) nb-run-generic PHASE=$(PHASE4) NOTEBOOK=$(NOTEBOOK4) VARIANT=$(VARIANT)
+
+
+############################################
+# 2. EJECUCIÓN DE LA SCRIPT
+############################################
+script4-run: check-variant-format
+	$(MAKE) script-run-generic PHASE=$(PHASE4) SCRIPT=$(SCRIPT4) VARIANT=$(VARIANT)
+
+
+############################################
+# 3. CREAR VARIANTE DE LA FASE 04
+############################################
+# Uso:
+# make variant4 VARIANT=v201 PARENT=v111 \
+#   OBJECTIVE="{operator: OR, events: [GRID_OVERVOLTAGE, INVERTER_FAULT]}"
+
+variant4: check-variant-format
+	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN (variante de F03)"; exit 1)
+	@test -n "$(OBJECTIVE)" || (echo "[ERROR] Debes especificar OBJECTIVE='{operator: OR, events: [...]}'"; exit 1)
+	@echo "==> Preparando parámetros específicos para Fase 04 (Target Engineering)"
+	@$(eval SET_LIST := \
+		--set parent_variant=$(PARENT) \
+		--set prediction_objective='$(OBJECTIVE)' )
+	@$(MAKE) variant-generic PHASE=$(PHASE4) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
+	@echo "[OK] Variante $(VARIANT) creada para Fase 04."
+
+
+############################################
+# 4. PUBLICAR VARIANTE DE FASE 04
+############################################
+publish4: check-variant-format
+	@echo "==> Validando variante $(PHASE4):$(VARIANT)"
+	# Artefactos típicos F04: parquet + json + html
+	$(MAKE) publish-generic PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04) \
+		PUBLISH_EXTS="parquet json html" VARIANT=$(VARIANT)
+
+
+############################################
+# 5. ELIMINAR VARIANTE FASE 04
+############################################
+remove4: check-variant-format
+	$(MAKE) remove-generic PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04) VARIANT=$(VARIANT)
+
+
+############################################
+# 6. CHEQUEO DE RESULTADOS
+############################################
+script4-check-results: check-variant-format
+	$(MAKE) check-results-generic PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04) \
+		VARIANT=$(VARIANT) CHECK_FILES="04_targetengineering_dataset.parquet \
+		04_targetengineering_metadata.json 04_targetengineering_params.json \
+		04_targetengineering_report.html"
+
+
+############################################
+# 7. CHEQUEO DE DVC PARA FASE 04
+############################################
+script4-check-dvc:
+	$(MAKE) check-dvc-generic PHASE=$(PHASE4)
+
+
+############################################
+# 8. LIMPIEZA DE FASE 04
+############################################
+clean4-all:
+	$(MAKE) clean-phase-generic PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04)
+
+remove4-all:
+	$(MAKE) remove-phase-all PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04)
+
+
+
+advise4: check-variant-format
+	@echo "[INFO] ChatGPT Plus NO incluye cuota de API; se requiere billing en platform.openai.com"
+	@test -n "$(OPENAI_API_KEY)" || \
+	  (echo "[ERROR] Debes proporcionar OPENAI_API_KEY (https://platform.openai.com/account/api-keys)"; exit 1)
+	@echo "==> Generando recomendación de modelado para Fase 04, variante $(VARIANT)"
+	OPENAI_API_KEY="$(OPENAI_API_KEY)" \
+	$(PYTHON) scripts/advise_modeling.py --phase $(PHASE4) --variant $(VARIANT)
+
+
+############################################
+# 9. HELP
+############################################
+help4:
+	@echo "==============================================="
+	@echo " FASE 04 — TARGET ENGINEERING"
+	@echo "==============================================="
+	@echo ""
+	@echo " CREAR VARIANTE (requiere PARENT de F03):"
+	@echo "   make variant4 VARIANT=v201 PARENT=v111 \\"
+	@echo "       OBJECTIVE=\"{operator: OR, events: [GRID_OVERVOLTAGE, INVERTER_FAULT]}\""
+	@echo ""
+	@echo " EJECUTAR NOTEBOOK:"
+	@echo "   make nb4-run VARIANT=v201"
+	@echo ""
+	@echo " EJECUTAR SCRIPT:"
+	@echo "   make script4-run VARIANT=v201"
+	@echo ""
+	@echo " CHEQUEOS:"
+	@echo "   make script4-check-results VARIANT=v201"
+	@echo "   make script4-check-dvc"
+	@echo ""
+	@echo " PUBLICAR:"
+	@echo "   make publish4 VARIANT=v201"
+	@echo ""
+	@echo " LIMPIAR / ELIMINAR:"
+	@echo "   make remove4 VARIANT=v201"
+	@echo "   make clean4-all"
+	@echo ""
+	@echo " ADVISE (RECOMENDACIÓN DE MODELADO):"
+	@echo "   make advise4 VARIANT=vNNN OPENAI_API_KEY=tu_api_key"
+	@echo "       # Genera un informe con recomendaciones de técnicas de modelado"
+	@echo "       # compatibles con TensorFlow Lite / TFLite Micro (ESP32)"
+	@echo ""
+	@echo "==============================================="
+
+
+############################################
+# FASE 05 — MODELING
+############################################
+
+PHASE5=05_modeling
+VARIANTS_DIR_05 = executions/$(PHASE5)
+NOTEBOOK5=notebooks/05_modeling.ipynb
+SCRIPT5=scripts/05_modeling.py
+
+
+############################################
+# 1. EJECUCIÓN DEL NOTEBOOK
+############################################
+nb5-run: check-variant-format
+	$(MAKE) nb-run-generic PHASE=$(PHASE5) NOTEBOOK=$(NOTEBOOK5) VARIANT=$(VARIANT)
+
+
+############################################
+# 2. EJECUCIÓN DE LA SCRIPT
+############################################
+script5-run: check-variant-format
+	$(MAKE) script-run-generic PHASE=$(PHASE5) SCRIPT=$(SCRIPT5) VARIANT=$(VARIANT)
+
+
+############################################
+# 3. CREAR VARIANTE DE LA FASE 05
+############################################
+# Uso:
+# make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_nn
+#
+# Los valores por defecto (AutoML, métricas, etc.)
+# se toman de base_params.yaml y pueden modificarse
+# editando params.yaml tras la creación de la variante.
+
+variant5: check-variant-format
+	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN (variante de F04)"; exit 1)
+	@test -n "$(MODEL_FAMILY)" || (echo "[ERROR] Debes especificar MODEL_FAMILY (familias soportadas: sequence_embedding, dense_bow, cnn1d)"; exit 1)
+	@echo "==> Preparando parámetros específicos para Fase 05 (Modeling)"
+	@$(eval SET_LIST := \
+		--set parent_variant=$(PARENT) \
+		--set model_family=$(MODEL_FAMILY) )
+	@$(MAKE) variant-generic PHASE=$(PHASE5) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
+	@echo "[OK] Variante $(VARIANT) creada para Fase 05."
+
+
+############################################
+# 4. PUBLICAR VARIANTE DE FASE 05
+############################################
+# En F05 se publican:
+# - params.yaml
+# - <phase>_params.json
+# - <phase>_metadata.json   (OBLIGATORIO)
+# - artefactos de modelos y splits (parquet / h5 / json)
+# - informes html
+
+publish5: check-variant-format
+	@echo "==> Validando variante $(PHASE5):$(VARIANT)"
+	@test -f $(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json || \
+	  (echo "[ERROR] Falta $(PHASE5)_metadata.json (obligatorio en F05)"; exit 1)
+	$(MAKE) publish-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) \
+		PUBLISH_EXTS="parquet json html h5" VARIANT=$(VARIANT)
+
+
+############################################
+# 5. ELIMINAR VARIANTE FASE 05
+############################################
+remove5: check-variant-format
+	$(MAKE) remove-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) VARIANT=$(VARIANT)
+
+remove5-all:
+	$(MAKE) remove-phase-all PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05)
+
+
+############################################
+# 6. CHEQUEO DE RESULTADOS
+############################################
+# En F05 no se valida un único dataset, sino:
+# - existencia de metadata
+# - al menos un candidato si se ha ejecutado la fase
+
+script5-check-results: check-variant-format
+	@test -f $(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json || \
+	  (echo "[FAIL] Falta $(PHASE5)_metadata.json"; exit 1)
+	@echo "[OK] Metadata de Fase 05 presente"
+	@test -d $(VARIANTS_DIR_05)/$(VARIANT)/candidates || \
+	  (echo "[WARN] No existe carpeta candidates (¿fase no ejecutada aún?)"; exit 0)
+	@echo "[OK] Carpeta candidates presente"
+
+
+############################################
+# 7. CHEQUEO DE DVC PARA FASE 05
+############################################
+script5-check-dvc:
+	$(MAKE) check-dvc-generic PHASE=$(PHASE5)
+
+
+############################################
+# 8. LIMPIEZA DE FASE 05
+############################################
+clean5-all:
+	$(MAKE) clean-phase-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05)
+
+
+############################################
+# 9. HELP
+############################################
+help5:
+	@echo "==============================================="
+	@echo " FASE 05 — MODELING"
+	@echo "==============================================="
+	@echo ""
+	@echo " CREAR VARIANTE (requiere PARENT de F04):"
+	@echo "   make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_nn"
+	@echo ""
+	@echo " EJECUTAR NOTEBOOK:"
+	@echo "   make nb5-run VARIANT=v301"
+	@echo ""
+	@echo " EJECUTAR SCRIPT:"
+	@echo "   make script5-run VARIANT=v301"
+	@echo ""
+	@echo " CHEQUEOS:"
+	@echo "   make script5-check-results VARIANT=v301"
+	@echo "   make script5-check-dvc"
+	@echo ""
+	@echo " PUBLICAR:"
+	@echo "   make publish5 VARIANT=v301"
+	@echo ""
+	@echo " LIMPIAR / ELIMINAR:"
+	@echo "   make remove5 VARIANT=v301"
+	@echo "   make clean5-all"
+	@echo ""
+	@echo " NOTAS:"
+	@echo " - Cada variante F05 explora UNA familia de modelos."
+	@echo " - La selección de candidatos se basa en umbral de métrica primaria."
+	@echo " - Si ningún modelo supera el umbral, se conserva el mejor."
+	@echo " - La metadata es obligatoria para publicar la variante."
+	@echo ""
+	@echo "==============================================="
+
+############################################
+# FASE 06 — PACKAGING
+############################################
+
+PHASE6 := 06_packaging
+VARIANTS_DIR_06 := executions/$(PHASE6)
+
+# ------------------------------------------------------------
+# Crear variante F06
+# ------------------------------------------------------------
+# ------------------------------------------------------------
+# Crear variante F06 (PACKAGING) — con validación y herencia
+# ------------------------------------------------------------
+variant6: check-variant-format
+	@echo "==> Creando variante F06 $(VARIANT)"
+
+	@if [ -z "$(MODELS)" ]; then \
+		echo "[ERROR] MODELS es obligatorio en F06"; exit 1; \
+	fi
+	@if [ -z "$(PARENTS_F05)" ]; then \
+		echo "[ERROR] PARENTS_F05 es obligatorio"; exit 1; \
+	fi
+
+	@echo "==> Validando MODELS"
+	@$(CHECK_MODELS_YAML)
+
+	# Tomamos el primer parent F05 como referencia de herencia
+	$(eval FIRST_F05 := $(word 1,$(PARENTS_F05)))
+
+	# Resolver F04 y F03 a partir de F05 (trazabilidad)
+	$(eval F04_FROM_F05 := $(shell yq '.parent_variant' executions/05_modeling/$(FIRST_F05)/params.yaml))
+	$(eval F03_FROM_F04 := $(shell yq '.parent_variant' executions/04_targetengineering/$(F04_FROM_F05)/params.yaml))
+
+	# Herencia por defecto del régimen temporal (copia literal)
+	$(eval Tu_FINAL := $(if $(Tu),$(Tu),$(shell yq '.temporal.Tu' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
+	$(eval OW_FINAL := $(if $(OW),$(OW),$(shell yq '.temporal.OW' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
+	$(eval PW_FINAL := $(if $(PW),$(PW),$(shell yq '.temporal.PW' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
+
+	# Resolver F02 para el replay (herencia por defecto)
+	$(eval F02_FROM_F03 := $(shell yq '.parent_variant' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml))
+	$(eval REPLAY_DATASET_FINAL := $(if $(REPLAY_DATASET),$(REPLAY_DATASET),$(F02_FROM_F03)))
+
+	$(PYTHON) mlops4ofp/tools/params_manager.py \
+		create-variant \
+		--phase 06_packaging \
+		--variant $(VARIANT) \
+		--set parent_variants_f05="$(PARENTS_F05)" \
+		--set temporal.Tu=$(Tu_FINAL) \
+		--set temporal.OW=$(OW_FINAL) \
+		--set temporal.PW=$(PW_FINAL) \
+		--set models='$(MODELS)' \
+		--set replay.dataset_id=$(REPLAY_DATASET_FINAL)
+
+	@echo "[OK] Variante F06 $(VARIANT) creada"
+
+
+
+# ------------------------------------------------------------
+# Ejecutar notebook
+# ------------------------------------------------------------
+nb6-run: check-variant-format
+	@echo "==> Ejecutando notebook F06 $(VARIANT)"
+	$(PYTHON) -m nbconvert \
+		--to notebook \
+		--execute notebooks/$(PHASE6).ipynb \
+		--output executed_$(PHASE6)_$(VARIANT).ipynb \
+		--ExecutePreprocessor.timeout=600
+
+# ------------------------------------------------------------
+# Ejecutar script
+# ------------------------------------------------------------
+script6-run: check-variant-format
+	@echo "==> Ejecutando script F06 $(VARIANT)"
+	$(PYTHON) scripts/$(PHASE6).py \
+		--variant $(VARIANT)
+
+# ------------------------------------------------------------
+# Validaciones básicas (coherencia / trazabilidad)
+# ------------------------------------------------------------
+check6: check-variant-format
+	@echo "==> Validando variante F06 $(VARIANT)"
+	$(PYTHON) mlops4ofp/tools/traceability.py validate-variant \
+		--phase $(PHASE6) \
+		--variant $(VARIANT)
+
+# ------------------------------------------------------------
+# Publicar resultados (DVC + git)
+# ------------------------------------------------------------
+publish6: check-variant-format
+	@echo "==> Publicando F06 $(VARIANT)"
+	dvc add $(VARIANTS_DIR_06)/$(VARIANT) || true
+	git add $(VARIANTS_DIR_06)/$(VARIANT) $(VARIANTS_DIR_06)/variants.yaml
+	git commit -m "F06 packaging: $(VARIANT)" || true
+	dvc push || true
+	git push || true
+
+# ------------------------------------------------------------
+# Exportar paquete (release externo)
+# ------------------------------------------------------------
+export6: check-variant-format
+	@echo "==> Exportando paquete F06 $(VARIANT)"
+	tar -czf $(PHASE6)_$(VARIANT).tar.gz -C $(VARIANTS_DIR_06) $(VARIANT)
+
+# ------------------------------------------------------------
+# Eliminar variante
+# ------------------------------------------------------------
+remove6: check-variant-format
+	@echo "==> Comprobando si la variante $(PHASE6):$(VARIANT) tiene hijos…"
+	$(PYTHON) mlops4ofp/tools/traceability.py can-delete \
+		--phase $(PHASE6) \
+		--variant $(VARIANT)
+	@echo "==> Eliminando carpeta completa de la variante"
+	rm -rf $(VARIANTS_DIR_06)/$(VARIANT)
+	@echo "==> Actualizando registro de variantes"
+	$(PYTHON) mlops4ofp/tools/params_manager.py delete-variant \
+		--phase $(PHASE6) \
+		--variant $(VARIANT)
+	@git add -A
+	@git commit -m "remove variant: $(PHASE6) $(VARIANT)" || true
+	@git push || true
+
+# ------------------------------------------------------------
+# Limpiar artefactos locales
+# ------------------------------------------------------------
+clean6:
+	rm -rf $(VARIANTS_DIR_06)/*/figures
+	rm -f $(PHASE6)_*.tar.gz
+
+# ------------------------------------------------------------
+# Ayuda
+# ------------------------------------------------------------
+help6:
+help6:
+	@echo "=================================================="
+	@echo " F06 — PACKAGING (sistema agnóstico)"
+	@echo "=================================================="
+	@echo ""
+	@echo "Objetivo:"
+	@echo "  Componer un paquete de sistema a partir de variantes F05,"
+	@echo "  seleccionando modelos y fijando valores temporales comunes."
+	@echo ""
+	@echo "Reglas clave:"
+	@echo "  - F06 NO ejecuta inferencia"
+	@echo "  - F06 NO evalúa métricas"
+	@echo "  - F06 NO interpreta semántica temporal"
+	@echo "  - F06 es agnóstica del runtime"
+	@echo ""
+	@echo "Herencia por defecto:"
+	@echo "  - Si Tu / OW / PW no se especifican, se heredan literalmente"
+	@echo "    desde la fase 03 (preparewindowsds)."
+	@echo "  - Si REPLAY_DATASET no se especifica, se hereda desde la fase 02."
+	@echo "  - La herencia es pasiva: F06 no valida ni modifica valores."
+	@echo ""
+	@echo "Uso:"
+	@echo "  make variant6 VARIANT=vNNN \\"
+	@echo "       PARENTS_F05=\"vAAA vBBB\" \\"
+	@echo "       MODELS=\"<yaml>\" \\"
+	@echo "       [Tu=<valor>] [OW=<valor>] [PW=<valor>] \\"
+	@echo "       [REPLAY_DATASET=<f02_variant>]"
+	@echo ""
+	@echo "Parámetros obligatorios:"
+	@echo "  VARIANT       Nombre de la variante (vNNN)"
+	@echo "  PARENTS_F05   Lista de variantes F05 (separadas por espacios)"
+	@echo "  MODELS        Selección explícita de modelos (YAML)"
+	@echo ""
+	@echo "Parámetros opcionales (override):"
+	@echo "  Tu, OW, PW    Valores temporales del sistema"
+	@echo "  REPLAY_DATASET  Dataset de replay (variante F02)"
+	@echo ""
+	@echo "Notas:"
+	@echo "  - No se admiten inputs RAW en F06."
+	@echo "  - Todos los valores finales quedan sellados en params.yaml."
+	@echo "=================================================="
+	@echo "  make nb6-run VARIANT=vNNN"
+	@echo "  make script6-run VARIANT=vNNN"
+	@echo "  make check6 VARIANT=vNNN"
+	@echo "  make publish6 VARIANT=vNNN"
+	@echo "  make export6 VARIANT=vNNN"
+	@echo "  make remove6 VARIANT=vNNN"
+	@echo "  make clean6"
+
+
+
+
+
+
+
+
 
 
 # ==========================================
@@ -686,14 +1190,16 @@ help3:
 
 clean-all-all:
 	@echo "==> Limpiando todas las fases"
-	$(MAKE) clean1-all
-	$(MAKE) clean2-all
+	$(MAKE) clean5-all
+	$(MAKE) clean4-all
 	$(MAKE) clean3-all
+	$(MAKE) clean2-all
+	$(MAKE) clean1-all
 	@echo "[OK] Limpieza completa de todas las fases (solo parámetros y variantes)"
 
 help:
 	@echo "==============================================="
-	@echo " MLOps4OFP — Pipeline en 3 Fases"
+	@echo " MLOps4OFP — Pipeline en 4 Fases"
 	@echo "==============================================="
 	@echo ""
 	@echo " FASE 01: EXPLORE (análisis de datos RAW)"
@@ -714,13 +1220,15 @@ help:
 .PHONY: \
 	setup check-setup clean-setup help-setup \
 	nb-run-generic script-run-generic publish-generic remove-generic check-dvc-generic check-results-generic clean-phase-generic export-generic \
-	nb1-run nb2-run nb3-run \
+	nb1-run nb2-run nb3-run nb4-run \
 	script1-run script1-repro script1-check-results script1-check-dvc script2-run script2-repro script2-check-results script2-check-dvc script3-run script3-repro script3-check-results script3-check-dvc \
-	variant1 variant2 variant3 variant-generic check-variant-format \
-	publish1 publish2 publish3 \
-	remove1 remove2 remove3 \
+	script4-run \
+	variant1 variant2 variant3 variant4 variant-generic check-variant-format \
+	publish1 publish2 publish3 publish4\
+	remove1 remove2 remove3 remove4 \
 	export3 \
-	clean1-all clean2-all clean3-all clean-all-all \
+	clean1-all clean2-all clean3-all clean4-all clean-all-all \
 	tag1-stage-ready tag1-script-ready tag1-stable tag2-stage-ready tag2-script-ready tag2-stable tag3-stage-ready tag3-script-ready tag3-stable \
-	help1 help2 help3 help \
+	help1 help2 help3 help4 help \
+	advise4 \
 	switch-remote-local switch-remote-public switch-remote-private check-remotes

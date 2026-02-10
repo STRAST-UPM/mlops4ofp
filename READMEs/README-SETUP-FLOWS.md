@@ -2,6 +2,89 @@
 # MLOps4OFP — Guía de configuraciones de setup
 # ============================================================
 
+## Requisito obligatorio: versión de Python
+
+⚠️ **Este proyecto requiere una versión concreta de Python.**  
+El setup **no funcionará** con versiones no soportadas.
+
+### Versiones soportadas
+- ✅ **Python 3.10**
+- ✅ **Python 3.11**
+
+### Versiones NO soportadas
+- ❌ Python 3.12
+- ❌ Python 3.13 o superior
+
+**Motivo:**  
+El pipeline utiliza TensorFlow y librerías científicas que **no son estables** en Python ≥3.12 a día de hoy.  
+Usar versiones no soportadas puede provocar:
+- cuelgues silenciosos
+- bloqueos durante el entrenamiento
+- comportamiento no determinista
+
+El script `setup.py` **verifica automáticamente** la versión de Python y aborta con un mensaje claro si no es compatible.
+
+---
+
+### Cómo comprobar tu versión de Python
+
+```bash
+python --version
+```
+
+Debe mostrar algo como
+Python 3.10.x
+o
+Python 3.11.x
+
+### Cómo instalar Python 3.11 si no lo tienes
+
+**macox (homebrew)
+```bash
+brew install python@3.11
+```
+
+Ejecuta el setup con:
+```bash
+python3.11 setup.py -c setup/local.yaml
+```
+
+**Ubuntu / Debian
+```
+sudo apt update
+sudo apt install python3.11 python3.11-venv
+```
+
+Ejecuta el setup con:
+```
+python3.11 setup.py -c setup/local.yaml
+```
+
+**Windows
+
+Descarga Python 3.11 desde: https://www.python.org/downloads/
+
+Marca la opción “Add Python to PATH” durante la instalación
+
+Ejecuta:
+```
+python setup.py -c setup\local.yaml
+```
+
+**Nota importante sobre entornos virtuales
+
+El entorno virtual (.venv) no elige la versión de Python.
+
+La versión de Python se decide antes de crear el entorno virtual.
+
+Por eso, es fundamental ejecutar setup.py con una versión compatible desde el inicio.
+
+Ejemplo correcto:
+```
+python3.11 setup.py -c setup/local.yaml
+```
+
+
 ## Flujos disponibles
 
 ### 1. LOCAL (Recomendado para desarrollo local)

@@ -1,0 +1,113 @@
+# ============================================================
+# FASE 05 — MODELING
+# Parámetros base por defecto
+# ============================================================
+# Este fichero define:
+# - la estructura mínima obligatoria de una variante F05
+# - valores por defecto razonables
+#
+# El contenido de search_space es deliberadamente libre
+# (_free_keys en traceability_schema.yaml)
+# ============================================================
+
+# ------------------------------------------------------------
+# Linaje
+# ------------------------------------------------------------
+parent_variant: null        # vNNN (variante de F04) — OBLIGATORIO
+model_family: null          # sequence_embedding | dense_bow | cnn1d — OBLIGATORIO
+
+
+# ------------------------------------------------------------
+# AutoML (ligero, reproducible)
+# ------------------------------------------------------------
+automl:
+  max_trials: 3            # número de experimentos por variante
+  seed: 42                  # semilla global para reproducibilidad
+
+
+# ------------------------------------------------------------
+# Entrenamiento
+# ------------------------------------------------------------
+training:
+  epochs: 3
+  batch_size: [32, 64]      # usado como espacio de búsqueda
+  learning_rate: [0.001, 0.0005]
+  max_samples: 100000000
+
+
+# ------------------------------------------------------------
+# Manejo de desbalanceo
+# ------------------------------------------------------------
+imbalance:
+  strategy: auto            # auto | none
+  metric_focus: recall      # métrica prioritaria (documental)
+
+
+# ------------------------------------------------------------
+# Evaluación
+# ------------------------------------------------------------
+evaluation:
+  split:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+
+
+# ------------------------------------------------------------
+# Métricas (documental / trazabilidad)
+# ------------------------------------------------------------
+metrics:
+  primary: recall
+  secondary:
+    - precision
+    - f1
+    - confusion_matrix
+
+
+# ------------------------------------------------------------
+# Selección de candidatos
+# ------------------------------------------------------------
+candidate_selection:
+  threshold: 0.80           # umbral mínimo de métrica primaria
+  policy: keep_all_above    # keep_all_above | fallback_best
+
+
+# ------------------------------------------------------------
+# Espacios de búsqueda por familia
+# (clave libre, validada solo por el código)
+# ------------------------------------------------------------
+search_space:
+
+  # ----------------------------------------------------------
+  # DENSE_BOW
+  # ----------------------------------------------------------
+  dense_bow:
+    n_layers: [1, 2]
+    units: [32, 64]
+    dropout: [0.0, 0.2]
+    learning_rate: [0.001, 0.0005]
+    batch_size: [32, 64]
+
+  # ----------------------------------------------------------
+  # SEQUENCE_EMBEDDING
+  # ----------------------------------------------------------
+  sequence_embedding:
+    embed_dim: [8, 16]
+    n_layers: [1, 2]
+    units: [32, 64]
+    dropout: [0.0, 0.2]
+    learning_rate: [0.001, 0.0005]
+    batch_size: [32, 64]
+
+  # ----------------------------------------------------------
+  # CNN1D
+  # ----------------------------------------------------------
+  cnn1d:
+    embed_dim: [8, 16]
+    filters: [16, 32]
+    kernel_size: [3, 5]
+    n_layers: [1]
+    units: [32, 64]
+    dropout: [0.0, 0.2]
+    learning_rate: [0.001, 0.0005]
+    batch_size: [32, 64]

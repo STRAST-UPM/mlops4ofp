@@ -2,49 +2,48 @@
 # -*- coding: utf-8 -*-
 
 """
-Fase 03 — prepareWindowsDS (OPTIMIZADA)
+Fase 03 — prepareWindowsDS (OPTIMIZADA + FACTORIZADA)
 
-Genera el dataset FINAL de ventanas:
-- OW_events: lista de códigos de eventos en la ventana de observación
-- PW_events: lista de códigos de eventos en la ventana de predicción
-
-Optimizada para datasets grandes:
-- Lectura selectiva de columnas
-- Aplanado + NaN en una sola pasada
-- Escritura Parquet por batches grandes
-- Fast-path O(N+W) para estrategia synchro (sin bisect por ventana)
+Estrategias soportadas:
+- synchro   : ventanas en todo Tu (fast-path O(N+W))
+- asynOW    : abrir ventana solo si OW tiene ≥1 evento
+- withinPW  : abrir ventana solo si PW tiene ≥1 evento
+- asynPW    : abrir ventana solo si hay evento al inicio de PW
 """
 
 # =====================================================================
 # IMPORTS
 # =====================================================================
-import sys
-from pathlib import Path
 import argparse
 import json
-from bisect import bisect_left
+import yaml
+from pathlib import Path
 from datetime import datetime, timezone
-from time import perf_counter
+from collections import Counter
+import re
 
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import yaml
+import matplotlib.pyplot as plt
 
-# =====================================================================
-# BOOTSTRAP
-# =====================================================================
+import sys
+
+# ============================================================
+# BOOTSTRAP (OBLIGATORIO ANTES DE IMPORTAR mlops4ofp)
+# ============================================================
+
 SCRIPT_PATH = Path(__file__).resolve()
-ROOT = SCRIPT_PATH
+BOOTSTRAP_ROOT = SCRIPT_PATH
 for _ in range(10):
-    if (ROOT / "mlops4ofp").exists():
+    if (BOOTSTRAP_ROOT / "mlops4ofp").exists():
         break
-    ROOT = ROOT.parent
+    BOOTSTRAP_ROOT = BOOTSTRAP_ROOT.parent
 else:
-    raise RuntimeError("No se pudo localizar project root")
+    raise RuntimeError("No se pudo localizar el repo root (mlops4ofp)")
 
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(BOOTSTRAP_ROOT))
+
+
 
 # =====================================================================
 # IMPORTS PROYECTO
@@ -53,12 +52,38 @@ from mlops4ofp.tools.run_context import (
     detect_execution_dir,
     detect_project_root,
     assemble_run_context,
+    build_phase_outputs,
 )
+from mlops4ofp.tools.params_manager import ParamsManager, validate_params
+from mlops4ofp.tools.artifacts import (
+    get_git_hash,
+    save_numeric_dataset,
+    save_params_and_metadata,
+)
+from mlops4ofp.tools.figures import save_figure
+
+execution_dir = detect_execution_dir()
+PROJECT_ROOT = detect_project_root(execution_dir)
 
 # =====================================================================
-# CONSTANTES
-# =====================================================================
 PHASE = "03_preparewindowsds"
+# =====================================================================
+
+
+# =====================================================================
+# HELPERS
+# =====================================================================
+def has_nan_in_range(nan_prefix, i0, i1):
+    if i0 >= i1:
+        return False
+    return nan_prefix[i1 - 1] - (nan_prefix[i0 - 1] if i0 else 0) > 0
+
+
+def flush_rows(writer, rows, schema):
+    if rows:
+        writer.write_table(pa.Table.from_pylist(rows, schema))
+        rows.clear()
+
 
 # =====================================================================
 # CLI
@@ -68,6 +93,7 @@ def parse_args():
     p.add_argument("--variant", required=True)
     p.add_argument("--execution-dir", type=Path, default=None)
     return p.parse_args()
+
 
 # =====================================================================
 # MAIN
@@ -80,14 +106,9 @@ def main():
 
     print(f"[F03] inicio main | phase={PHASE} variant={args.variant}", flush=True)
 
-    variant_root = (
-        project_root
-        / "executions"
-        / PHASE
-        / args.variant
-    )
+    variant_root = project_root / "executions" / PHASE / args.variant
 
-    ctx = assemble_run_context(
+    assemble_run_context(
         project_root=project_root,
         phase=PHASE,
         variant=args.variant,
@@ -96,100 +117,62 @@ def main():
     )
 
     # -----------------------------------------------------------------
-    # Cargar parámetros F03
+    # Params
     # -----------------------------------------------------------------
-    with open(variant_root / "params.yaml", "r", encoding="utf-8") as f:
+    with open(variant_root / "params.yaml", "r") as f:
         params = yaml.safe_load(f)
 
     OW = int(params["OW"])
     LT = int(params["LT"])
     PW = int(params["PW"])
-    Tu_raw = params.get("Tu", None)
-    Tu = float(Tu_raw) if Tu_raw is not None else 0.0
+    Tu = float(params.get("Tu") or 0)
     nan_strategy = params.get("nan_strategy", "discard")
     window_strategy = params.get("window_strategy", "synchro")
     parent_variant = params["parent_variant"]
     parent_phase = params.get("parent_phase", "02_prepareeventsds")
-    BATCH = int(params.get("batch_size", 10_000))  # OPT
+    BATCH = int(params.get("batch_size", 10_000))
 
-    # -----------------------------------------------------------------
-    # Resolver Tu desde metadata F02 si no viene fijado
-    # -----------------------------------------------------------------
-    if Tu_raw is None or Tu == 0:
+    if Tu == 0:
         with open(
-            project_root
-            / "executions"
-            / parent_phase
-            / parent_variant
-            / f"{parent_phase}_metadata.json",
-            "r",
-            encoding="utf-8",
+            project_root / "executions" / parent_phase / parent_variant /
+            f"{parent_phase}_metadata.json"
         ) as f:
-            meta_f02 = json.load(f)
-
-        Tu_f02 = meta_f02.get("Tu", None)
-        if Tu_f02 is None:
-            raise RuntimeError(
-                "No se pudo determinar Tu: es None en F03 params y en F02 metadata"
-            )
-        Tu = float(Tu_f02)
+            Tu = float(json.load(f)["Tu"])
 
     print(f"[F03] Tu = {Tu}", flush=True)
 
     # -----------------------------------------------------------------
-    # Cargar dataset F02 (OPT: solo columnas necesarias)
+    # Load dataset
     # -----------------------------------------------------------------
     input_dataset = (
-        project_root
-        / "executions"
-        / parent_phase
-        / parent_variant
-        / f"{parent_phase}_dataset.parquet"
+        project_root / "executions" / parent_phase / parent_variant /
+        f"{parent_phase}_dataset.parquet"
     )
 
-    print(f"[F03] leyendo dataset F02: {input_dataset}", flush=True)
-    t_read = perf_counter()
     table = pq.read_table(input_dataset, columns=["segs", "events"])
     df = table.to_pandas(split_blocks=True, self_destruct=True)
-    print(f"[F03] dataset cargado en {perf_counter() - t_read:,.1f}s", flush=True)
 
-    # -----------------------------------------------------------------
-    # Asegurar orden temporal
-    # -----------------------------------------------------------------
     if not df["segs"].is_monotonic_increasing:
-        t_sort = perf_counter()
         df = df.sort_values("segs", kind="mergesort").reset_index(drop=True)
-        print(f"[F03] ordenado en {perf_counter() - t_sort:,.1f}s", flush=True)
 
     # -----------------------------------------------------------------
-    # Leer catálogo NaN (antes de aplanar)
+    # NaN catalog
     # -----------------------------------------------------------------
     with open(
-        project_root
-        / "executions"
-        / parent_phase
-        / parent_variant
-        / f"{parent_phase}_event_catalog.json",
-        "r",
-        encoding="utf-8",
+        project_root / "executions" / parent_phase / parent_variant /
+        f"{parent_phase}_event_catalog.json"
     ) as f:
         catalog = json.load(f)
 
-    nan_codes = {
-        code for name, code in catalog.items()
-        if name.endswith("_NaN_NaN")
-    }
+    nan_codes = {c for n, c in catalog.items() if n.endswith("_NaN_NaN")}
 
     # -----------------------------------------------------------------
-    # Preparar arrays (OPT: una sola pasada Python)
+    # Flatten
     # -----------------------------------------------------------------
-    print("[F03] preparando arrays...", flush=True)
-    t_arr = perf_counter()
-
     times = df["segs"].to_numpy(dtype=np.int64, copy=False)
     events = df["events"].to_numpy()
 
-    lengths = np.fromiter((len(evs) for evs in events), dtype=np.int64, count=len(events))
+    lengths = np.fromiter((len(e) for e in events), dtype=np.int64, count=len(events))
     offsets = np.empty(len(events) + 1, dtype=np.int64)
     offsets[0] = 0
     np.cumsum(lengths, out=offsets[1:])
@@ -214,25 +197,19 @@ def main():
                         break
             pos += l
 
-    if nan_strategy == "discard":
-        nan_prefix = np.cumsum(has_nan, dtype=np.int64)
-    else:
-        nan_prefix = None
-
-    print(
-        f"[F03] arrays listos en {perf_counter() - t_arr:,.1f}s | "
-        f"eventos totales: {total_events:,}",
-        flush=True,
-    )
+    nan_prefix = np.cumsum(has_nan, dtype=np.int64) if nan_strategy == "discard" else None
 
     # -----------------------------------------------------------------
-    # Ventanas
+    # Geometry
     # -----------------------------------------------------------------
     OW_span = OW * Tu
     PW_start = (OW + LT) * Tu
     PW_span = PW * Tu
     total_span = PW_start + PW_span
 
+    # -----------------------------------------------------------------
+    # Output
+    # -----------------------------------------------------------------
     output_path = variant_root / f"{PHASE}_dataset.parquet"
     schema = pa.schema([
         ("OW_events", pa.list_(pa.int32())),
@@ -241,17 +218,13 @@ def main():
     writer = pq.ParquetWriter(output_path, schema, compression="snappy")
 
     rows = []
-    rows_append = rows.append
-    offsets_l = offsets
-    events_flat_l = events_flat
-
     windows_total = 0
     windows_written = 0
 
     t_loop = perf_counter()
 
     # =================================================================
-    # FAST PATH: SYNCHRO (OPT: sin bisect por ventana)
+    # FAST PATH: SYNCHRO
     # =================================================================
     if window_strategy == "synchro":
         n = len(times)
@@ -268,27 +241,25 @@ def main():
             if i_ow_0 != i_ow_1 or i_pw_0 != i_pw_1:
                 if nan_strategy == "discard":
                     if (
-                        (i_ow_0 < i_ow_1 and
-                         nan_prefix[i_ow_1 - 1] - (nan_prefix[i_ow_0 - 1] if i_ow_0 else 0) > 0)
-                        or
-                        (i_pw_0 < i_pw_1 and
-                         nan_prefix[i_pw_1 - 1] - (nan_prefix[i_pw_0 - 1] if i_pw_0 else 0) > 0)
+                        has_nan_in_range(nan_prefix, i_ow_0, i_ow_1)
+                        or has_nan_in_range(nan_prefix, i_pw_0, i_pw_1)
                     ):
                         pass
                     else:
-                        ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
-                        pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
-                        rows_append({"OW_events": ow_events, "PW_events": pw_events})
-                        windows_written += 1
+                        ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                        pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                        if len(ow) or len(pw):
+                            rows.append({"OW_events": ow, "PW_events": pw})
+                            windows_written += 1
                 else:
-                    ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
-                    pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
-                    rows_append({"OW_events": ow_events, "PW_events": pw_events})
-                    windows_written += 1
+                    ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                    pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                    if len(ow) or len(pw):
+                        rows.append({"OW_events": ow, "PW_events": pw})
+                        windows_written += 1
 
             if len(rows) >= BATCH:
-                writer.write_table(pa.Table.from_pylist(rows, schema))
-                rows.clear()
+                flush_rows(writer, rows, schema)
 
             t0 += Tu
             ow_start = t0
@@ -306,48 +277,161 @@ def main():
                 i_pw_1 += 1
 
     # =================================================================
-    # FALLBACK: otras estrategias (mantiene bisect)
+    # ASYNOW
     # =================================================================
-    else:
-        def idx_range(t0, t1):
-            return bisect_left(times, t0), bisect_left(times, t1)
+    elif window_strategy == "asynOW":
+        active_bins = np.unique(((times[lengths > 0] - times[0]) // Tu).astype(np.int64))
 
+        for b in active_bins:
+            t0 = times[0] + b * Tu
+            if t0 + total_span > times[-1]:
+                continue
+
+            windows_total += 1
+
+            i_ow_0 = bisect_left(times, t0)
+            i_ow_1 = bisect_left(times, t0 + OW_span)
+            if i_ow_0 == i_ow_1:
+                continue
+
+            i_pw_0 = bisect_left(times, t0 + PW_start)
+            i_pw_1 = bisect_left(times, t0 + PW_start + PW_span)
+
+            if nan_strategy == "discard":
+                if (
+                    has_nan_in_range(nan_prefix, i_ow_0, i_ow_1)
+                    or has_nan_in_range(nan_prefix, i_pw_0, i_pw_1)
+                ):
+                    continue
+
+            ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+            pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+            if len(ow) or len(pw):
+                rows.append({"OW_events": ow, "PW_events": pw})
+                windows_written += 1
+
+            if len(rows) >= BATCH:
+                flush_rows(writer, rows, schema)
+
+    # =================================================================
+    # WITHINPW
+    # =================================================================
+    # =================================================================
+    # WITHINPW
+    # =================================================================
+    elif window_strategy == "withinPW":
+        n = len(times)
         t0 = times[0]
+
+        i_ow_0 = bisect_left(times, t0)
+        i_ow_1 = bisect_left(times, t0 + OW_span)
+        i_pw_0 = bisect_left(times, t0 + PW_start)
+        i_pw_1 = bisect_left(times, t0 + PW_start + PW_span)
+
         while t0 + total_span <= times[-1]:
             windows_total += 1
 
-            i_ow_0, i_ow_1 = idx_range(t0, t0 + OW_span)
-            i_pw_0, i_pw_1 = idx_range(t0 + PW_start, t0 + PW_start + PW_span)
-
-            if i_ow_0 != i_ow_1 or i_pw_0 != i_pw_1:
+            # 🔒 criterio withinPW: PW debe tener ≥1 evento REAL
+            if i_pw_0 != i_pw_1:
                 if nan_strategy == "discard":
                     if (
-                        (i_ow_0 < i_ow_1 and
-                         nan_prefix[i_ow_1 - 1] - (nan_prefix[i_ow_0 - 1] if i_ow_0 else 0) > 0)
-                        or
-                        (i_pw_0 < i_pw_1 and
-                         nan_prefix[i_pw_1 - 1] - (nan_prefix[i_pw_0 - 1] if i_pw_0 else 0) > 0)
+                        has_nan_in_range(nan_prefix, i_ow_0, i_ow_1)
+                        or has_nan_in_range(nan_prefix, i_pw_0, i_pw_1)
                     ):
                         pass
                     else:
-                        ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
-                        pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
-                        rows_append({"OW_events": ow_events, "PW_events": pw_events})
-                        windows_written += 1
+                        ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                        pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                        if len(pw):
+                            rows.append({"OW_events": ow, "PW_events": pw})
+                            windows_written += 1
                 else:
-                    ow_events = events_flat_l[offsets_l[i_ow_0]:offsets_l[i_ow_1]]
-                    pw_events = events_flat_l[offsets_l[i_pw_0]:offsets_l[i_pw_1]]
-                    rows_append({"OW_events": ow_events, "PW_events": pw_events})
-                    windows_written += 1
+                    ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                    pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                    if len(pw):
+                        rows.append({"OW_events": ow, "PW_events": pw})
+                        windows_written += 1
 
             if len(rows) >= BATCH:
-                writer.write_table(pa.Table.from_pylist(rows, schema))
-                rows.clear()
+                flush_rows(writer, rows, schema)
 
             t0 += Tu
+            ow_start = t0
+            ow_end = t0 + OW_span
+            pw_start = t0 + PW_start
+            pw_end = pw_start + PW_span
 
-    if rows:
-        writer.write_table(pa.Table.from_pylist(rows, schema))
+            while i_ow_0 < n and times[i_ow_0] < ow_start:
+                i_ow_0 += 1
+            while i_ow_1 < n and times[i_ow_1] < ow_end:
+                i_ow_1 += 1
+            while i_pw_0 < n and times[i_pw_0] < pw_start:
+                i_pw_0 += 1
+            while i_pw_1 < n and times[i_pw_1] < pw_end:
+                i_pw_1 += 1
+
+    # =================================================================
+    # ASYNPW
+    # =================================================================
+    elif window_strategy == "asynPW":
+        n = len(times)
+        t0 = times[0]
+
+        i_ow_0 = bisect_left(times, t0)
+        i_ow_1 = bisect_left(times, t0 + OW_span)
+        i_pw_0 = bisect_left(times, t0 + PW_start)
+        i_pw_1 = bisect_left(times, t0 + PW_start + PW_span)
+        i_pw_start1 = bisect_left(times, t0 + PW_start + Tu)
+
+        while t0 + total_span <= times[-1]:
+            windows_total += 1
+
+            # 🔒 criterio asynPW: evento al inicio de PW (primer Tu)
+            if i_pw_0 != i_pw_start1:
+                if nan_strategy == "discard":
+                    if (
+                        has_nan_in_range(nan_prefix, i_ow_0, i_ow_1)
+                        or has_nan_in_range(nan_prefix, i_pw_0, i_pw_1)
+                    ):
+                        pass
+                    else:
+                        ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                        pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                        if len(ow) or len(pw):
+                            rows.append({"OW_events": ow, "PW_events": pw})
+                            windows_written += 1
+                else:
+                    ow = events_flat[offsets[i_ow_0]:offsets[i_ow_1]]
+                    pw = events_flat[offsets[i_pw_0]:offsets[i_pw_1]]
+                    if len(ow) or len(pw):
+                        rows.append({"OW_events": ow, "PW_events": pw})
+                        windows_written += 1
+
+            if len(rows) >= BATCH:
+                flush_rows(writer, rows, schema)
+
+            t0 += Tu
+            ow_start = t0
+            ow_end = t0 + OW_span
+            pw_start = t0 + PW_start
+            pw_end = pw_start + PW_span
+
+            while i_ow_0 < n and times[i_ow_0] < ow_start:
+                i_ow_0 += 1
+            while i_ow_1 < n and times[i_ow_1] < ow_end:
+                i_ow_1 += 1
+            while i_pw_0 < n and times[i_pw_0] < pw_start:
+                i_pw_0 += 1
+            while i_pw_1 < n and times[i_pw_1] < pw_end:
+                i_pw_1 += 1
+            while i_pw_start1 < n and times[i_pw_start1] < pw_start + Tu:
+                i_pw_start1 += 1
+
+
+    else:
+        raise ValueError(f"Estrategia desconocida: {window_strategy}")
+
+    flush_rows(writer, rows, schema)
     writer.close()
 
     elapsed = perf_counter() - t_loop

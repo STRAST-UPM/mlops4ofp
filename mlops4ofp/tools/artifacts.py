@@ -51,7 +51,7 @@ def save_params_and_metadata(
     phase: str,
     variant: str,
     variant_root: Path,
-    raw_path: Path,
+    raw_path: Path | None = None,
     gen_params: dict,
     metadata_extra: dict,
     pm=None,
@@ -74,11 +74,13 @@ def save_params_and_metadata(
     metadata = {
         "phase": phase,
         "variant": variant,
-        "raw_file": str(raw_path),
         "git_commit": git_commit,
         "generated_at": datetime.now().astimezone().isoformat(),
         **metadata_extra,
     }
+
+    if raw_path is not None:
+        metadata["raw_file"] = str(raw_path)
 
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
@@ -87,5 +89,7 @@ def save_params_and_metadata(
         pm.save_metadata(metadata)
 
     return params_path, metadata_path
+
+
 
 

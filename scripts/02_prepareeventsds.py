@@ -24,7 +24,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import sys
-import os
 
 # ============================================================
 # BOOTSTRAP (OBLIGATORIO ANTES DE IMPORTAR mlops4ofp)
@@ -65,16 +64,11 @@ PROJECT_ROOT = detect_project_root(execution_dir)
 
 PHASE = "02_prepareeventsds"
 
-# Variante activa (misma convención que F01)
-ACTIVE_VARIANT = os.environ.get("VARIANT")
-if not ACTIVE_VARIANT:
-    raise RuntimeError(
-        "No se ha definido la variante activa.\n"
-        "Ejecuta mediante make, por ejemplo:\n"
-        "  make run-f02 VARIANT=v011"
-    )
+parser = argparse.ArgumentParser()
+parser.add_argument("--variant", required=True)
+args = parser.parse_args()
 
-execution_dir = Path.cwd()
+ACTIVE_VARIANT = args.variant
 
 variant_root = (
     PROJECT_ROOT

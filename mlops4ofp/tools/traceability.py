@@ -115,7 +115,12 @@ def find_children(phase: str, variant: str) -> List[str]:
                 and meta.get("parent_variant") == variant
             ):
                 children.append(f"{ph}:{vname}")
-
+            parent_list = meta.get("parent_variants_f05")
+            if ph == "06_packaging" and isinstance(parent_list, list):
+                if isinstance(parent_list, list) and phase == "05_modeling":
+                    if variant in parent_list:
+                        children.append(f"{ph}:{vname}")
+                    
     return children
 
 
@@ -180,17 +185,80 @@ def show_lineage(phase: str, variant: str):
 
 
 # ============================================================
+# MOSTRAR LINAJE COMPLETO COMO DAG (F06+)
+# ============================================================
+
+def show_lineage_dag(phase: str, variant: str):
+    """
+    Muestra el linaje completo de una variante como un DAG,
+    soportando múltiples padres (F06).
+    """
+
+    allv = load_all_variants()
+
+    if phase not in allv:
+        raise ValueError(f"No existe la fase {phase}")
+    if variant not in allv[phase]:
+        raise ValueError(f"No existe la variante {variant} en la fase {phase}")
+
+    visited = set()
+
+    def _print_node(ph: str, va: str, prefix: str, is_last: bool):
+        node_id = f"{ph}:{va}"
+        connector = "└─ " if is_last else "├─ "
+        print(prefix + connector + node_id)
+
+        if node_id in visited:
+            print(prefix + ("   " if is_last else "│  ") + "[...]")
+            return
+        visited.add(node_id)
+
+        meta = allv[ph][va]
+        parents = []
+
+        # Caso clásico (F01–F05)
+        pph = meta.get("parent_phase")
+        pva = meta.get("parent_variant")
+        if pph and pva:
+            parents.append((pph, pva))
+
+        # Caso F06 (linaje múltiple)
+        parent_list = meta.get("parent_variants_f05")
+        if isinstance(parent_list, list):
+            for pv in parent_list:
+                parents.append(("05_modeling", pv))
+
+        # Normalizar: eliminar duplicados
+        parents = list(dict.fromkeys(parents))
+
+        if not parents:
+            return
+
+        new_prefix = prefix + ("   " if is_last else "│  ")
+        for i, (pph, pva) in enumerate(parents):
+            last = (i == len(parents) - 1)
+            _print_node(pph, pva, new_prefix, last)
+
+    print("=== LINEAGE DAG ===")
+    print(f"{phase}:{variant}")
+    _print_node(phase, variant, "", True)
+    print("===================")
+
+
+
+# ============================================================
 # VALIDACIÓN DE METADATA
 # ============================================================
 
 def write_metadata(
     stage: str,
     variant: str,
-    parent_variant: str,
+    parent_variant: str | None,
     inputs: List[str],
     outputs: List[str],
     params: Dict[str, Any],
     metadata_path: str,
+    parent_variants: List[str] | None = None,
 ) -> None:
     metadata_path = Path(metadata_path)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,13 +266,17 @@ def write_metadata(
     data = {
         "stage": stage,
         "variant" : variant,
-        "parent_variant": parent_variant,
         "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "inputs": inputs,
         "outputs": outputs,
         "params": params,
         "git": {"commit": current_git_hash()}
     }
+    if parent_variant is not None:
+        data["parent_variant"] = parent_variant
+
+    if parent_variants is not None:
+        data["parent_variants"] = parent_variants
 
     metadata_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -294,6 +366,16 @@ def main():
     lineage_parser.add_argument("--phase", required=True, help="Fase (ej: 02_prepareeventsds)")
     lineage_parser.add_argument("--variant", required=True, help="Variante (ej: v002)")
 
+    # Subcomando: show-lineage-dag
+    lineage_dag_parser = subparsers.add_parser(
+        "show-lineage-dag",
+        help="Muestra el linaje completo como DAG (soporta F06)"
+    )
+    lineage_dag_parser.add_argument("--phase", required=True, help="Fase")
+    lineage_dag_parser.add_argument("--variant", required=True, help="Variante")
+
+
+
     args = parser.parse_args()
 
     try:
@@ -306,6 +388,9 @@ def main():
             sys.exit(0)
         elif args.command == "show-lineage":
             show_lineage(args.phase, args.variant)
+            sys.exit(0)
+        elif args.command == "show-lineage-dag":
+            show_lineage_dag(args.phase, args.variant)
             sys.exit(0)
         else:
             parser.print_help()
