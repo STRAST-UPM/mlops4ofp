@@ -1,7 +1,0 @@
-[core]
-    remote = storage
-['remote "storage"']
-    url = https://dagshub.com/mlops4ofp/mlops4ofp-apse.dvc
-    auth = basic
-    user = mlops4ofp
-    password = 4df1ce35a27b7eec3df81458031c84fa208bb510
