@@ -1,0 +1,5 @@
+outs:
+- md5: c5b21a2ebccb1d8a1baac9427ee3cbe8
+  size: 10903
+  hash: md5
+  path: 02_prepareeventsds_event_catalog.json
