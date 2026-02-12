@@ -145,6 +145,14 @@ def check_mlflow(cfg):
 
     ok("MLflow: configuración válida")
 
+def check_tensorflow_runtime():
+    try:
+        import tensorflow as tf
+        print(f"[OK] TensorFlow runtime {tf.__version__}")
+    except Exception as e:
+        fail(f"TensorFlow no funcional: {e}")
+
+
 
 # --------------------------------------------------
 # Main
@@ -167,6 +175,7 @@ def main():
     check_git(cfg)
     check_dvc(cfg)
     check_mlflow(cfg)
+    check_tensorflow_runtime()
 
     print("\n✔ Setup verificado correctamente")
 

@@ -185,6 +185,7 @@ Cada variante F05 se registra automáticamente en MLflow.
 ### Crear variante
 ```bash
 make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_bow
+make variant5 VARIANT=v111 PARENT=v101 MODEL_FAMILY=dense_bow IMBALANCE_STRATEGY=rare_events IMBALANCE_MAX_MAJ=20000
 ```
 
 ---

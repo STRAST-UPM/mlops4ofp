@@ -1,8 +1,0 @@
-window_strategy: synchro
-nan_strategy: discard
-OW: 600
-LT: 100
-PW: 100
-Tu: null
-variant_id: v100
-parent_variant: v010

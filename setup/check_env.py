@@ -3,8 +3,7 @@ import subprocess
 import sys
 import shutil
 
-MIN_PYTHON = (3, 10)
-MAX_PYTHON = (3, 11)
+REQUIRED_PYTHON = (3, 11)
 
 
 def run(cmd):
@@ -16,12 +15,10 @@ def run(cmd):
 
 def check_python():
     v = sys.version_info
-    v_mm = (v.major, v.minor)
-    if v_mm < MIN_PYTHON or v_mm > MAX_PYTHON:
+    if (v.major, v.minor) != REQUIRED_PYTHON:
         print(
             f"❌ Python {v.major}.{v.minor}.{v.micro} no soportado\n"
-            f"   Se requiere >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]} "
-            f"y <= {MAX_PYTHON[0]}.{MAX_PYTHON[1]}"
+            f"   Se requiere exactamente Python 3.11.x"
         )
         return False
 
@@ -57,6 +54,21 @@ def check_tool(name, mandatory=True):
         print(f"⚠ {name} encontrado pero no responde correctamente")
     return True
 
+def check_tensorflow():
+    try:
+        import tensorflow as tf
+        v = tuple(map(int, tf.__version__.split(".")[:2]))
+        if not (v[0] == 2 and v[1] == 15):
+            print(f"❌ TensorFlow {tf.__version__} no soportado (usar 2.15.x)")
+            return False
+        print(f"✔ TensorFlow {tf.__version__}")
+        return True
+    except Exception as e:
+        print(f"❌ TensorFlow no funciona: {e}")
+        return False
+
+
+
 def main():
     print("===================================")
     print(" CHECK ENTORNO — MLOps4OFP")
@@ -70,6 +82,7 @@ def main():
 
     ok &= check_python_module("mlflow", mandatory=True)
     ok &= check_tool("mlflow", mandatory=True)
+    ok &= check_tensorflow()
 
     if not ok:
         print("\n❌ Entorno NO válido para continuar con el setup")

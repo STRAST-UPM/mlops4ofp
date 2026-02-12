@@ -35,6 +35,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.optimizers import legacy as legacy_optimizers
+
 
 # ============================================================
 # BOOTSTRAP
@@ -278,7 +280,9 @@ def main(variant: str):
         / "04_targetengineering_dataset.parquet"
     )
 
+    print(">> Antes de leer parquet")
     df = pd.read_parquet(dataset_path)
+    print(">> Parquet leído")
 
     imbalance_cfg = params.get("imbalance", {})
     sampler_info = {}
@@ -286,11 +290,25 @@ def main(variant: str):
     # 1️⃣ Aplicar rare_events primero (si procede)
     df, sampler_info = apply_rare_events(df, imbalance_cfg, seed)
 
+    print("\n===== SAMPLING DEBUG =====")
+    print("strategy:", imbalance_cfg.get("strategy"))
+    print("total rows:", len(df))
+    print("positives:", (df["label"]==1).sum())
+    print("negatives:", (df["label"]==0).sum())
+    print("==========================\n")
+
+
+
     # 2️⃣ Aplicar max_samples solo si NO estamos en rare_events
     max_samples = params["training"].get("max_samples")
     if imbalance_cfg.get("strategy") != "rare_events":
         if max_samples is not None and len(df) > max_samples:
             df = df.sample(n=max_samples, random_state=seed)
+
+    print("After rare_events:")
+    print("  rows:", len(df))
+    print("  positives:", (df["label"]==1).sum())
+    print("  negatives:", (df["label"]==0).sum())
 
     X, y, aux = vectorize_fn(df)
 
@@ -337,7 +355,7 @@ def main(variant: str):
 
         model = build_model_fn(aux, hp)
         model.compile(
-            optimizer=keras.optimizers.Adam(hp["learning_rate"]),
+            optimizer=legacy_optimizers.Adam(hp["learning_rate"]),
             loss="binary_crossentropy",
             metrics=[keras.metrics.Recall(name="recall")],
         )
@@ -375,7 +393,26 @@ def main(variant: str):
     final_model_path = variant_root / "model_final.h5"
     best_model.save(final_model_path)
 
-    metadata_path = variant_root / f"{PHASE}_metadata.json"
+    from sklearn.metrics import confusion_matrix, precision_score, f1_score, recall_score
+
+    # Predicción en TEST
+    y_pred_prob = best_model.predict(X_test, verbose=0)
+    y_pred = (y_pred_prob >= 0.5).astype(int).ravel()
+
+    cm = confusion_matrix(y_test, y_pred).tolist()
+    precision = float(precision_score(y_test, y_pred, zero_division=0))
+    recall = float(recall_score(y_test, y_pred, zero_division=0))
+    f1 = float(f1_score(y_test, y_pred, zero_division=0))
+
+    print("\n=== TEST METRICS (best model) ===")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"F1:        {f1:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
+
+    trace_metadata_path = variant_root / f"{PHASE}_metadata.json"
+    functional_metadata_path = variant_root / "model_summary.json"
 
     metadata = {
         "phase": PHASE,
@@ -396,6 +433,12 @@ def main(variant: str):
             "config": imbalance_cfg,
             "sampler_info": sampler_info
         },
+        "test_metrics": {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "confusion_matrix": cm
+        },
         "trials_summary": trials_summary,
         "mlflow": {
             "run_id": None,
@@ -407,7 +450,7 @@ def main(variant: str):
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
-    with open(metadata_path, "w") as f:
+    with open(functional_metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
     write_metadata(
@@ -415,9 +458,9 @@ def main(variant: str):
         variant=variant,
         parent_variant=parent_variant,
         inputs=[str(dataset_path)],
-        outputs=[str(metadata_path)],
+        outputs=[str(functional_metadata_path)],
         params=params,
-        metadata_path=metadata_path,
+        metadata_path=trace_metadata_path,
     )
 
     print(f"[DONE] Fase 05 completada en {perf_counter()-t_start:.1f}s")

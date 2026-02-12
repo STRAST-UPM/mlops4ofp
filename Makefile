@@ -3,35 +3,26 @@
 # (MLflow, etc.)
 ############################################
 
-# ============================================================
-# Detección automática de Python 3.11
-# ============================================================
+############################################
+# PYTHON (estable)
+############################################
 
-# Permite override manual: make PYTHON=...
-PYTHON ?=
+PYTHON ?= python3.11
 
-# Si no se ha especificado PYTHON, intentamos autodetectar
-ifeq ($(PYTHON),)
-
-# Intentar python3.11 explícito
-PYTHON := $(shell command -v python3.11 2>/dev/null)
-
-# Si no existe, probar rutas típicas (macOS Intel / Apple Silicon)
-ifeq ($(PYTHON),)
-PYTHON := $(shell test -x /usr/local/bin/python3.11 && echo /usr/local/bin/python3.11)
+# Verificar que existe python3.11
+ifeq ($(shell command -v $(PYTHON) 2>/dev/null),)
+$(error python3.11 no encontrado en el sistema. Instálalo antes de ejecutar make setup)
 endif
 
-ifeq ($(PYTHON),)
-PYTHON := $(shell test -x /opt/homebrew/bin/python3.11 && echo /opt/homebrew/bin/python3.11)
-endif
+$(info [INFO] Usando intérprete Python: $(PYTHON))
 
-# Si sigue vacío, error explícito
-ifeq ($(PYTHON),)
-$(error No se encontró python3.11 en el sistema. \
-Instálalo (brew install python@3.11) \
-o ejecuta make PYTHON=/ruta/a/python3.11)
-endif
+############################################
+# CARGA AUTOMÁTICA DE VARIABLES DE ENTORNO
+############################################
 
+ifneq ("$(wildcard .mlops4ofp/env.sh)","")
+include .mlops4ofp/env.sh
+export
 endif
 
 $(info [INFO] Usando intérprete Python: $(PYTHON))
@@ -94,36 +85,9 @@ check-setup:
 	@.venv/bin/python setup/check_setup.py
 
 clean-setup:
-	@echo "==> Eliminando configuración de setup y DVC local"
-	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store
-	@echo "[OK] Setup y DVC local eliminado. El proyecto vuelve a estado post-clone."
-
-############################################
-# ADMIN — DVC GARBAGE COLLECTION (PELIGRO)
-############################################
-
-gc-admin:
-	@echo "==============================================="
-	@echo " ⚠️  DVC GARBAGE COLLECTION — ADMINISTRADOR ⚠️"
-	@echo "==============================================="
-	@echo ""
-	@echo "Esta operación eliminará DEFINITIVAMENTE"
-	@echo "los blobs DVC no referenciados por NINGÚN commit."
-	@echo ""
-	@echo "Remoto afectado: 'storage'"
-	@echo ""
-	@echo "NO ejecutar si no sabes exactamente lo que haces."
-	@echo ""
-	@read -p "Escribe EXACTAMENTE 'GC-ADMIN' para continuar: " CONFIRM; \
-	if [ "$$CONFIRM" != "GC-ADMIN" ]; then \
-		echo "[ABORT] Operación cancelada."; exit 1; \
-	fi
-	@echo ""
-	@echo "==> Ejecutando dvc gc (esto puede tardar)..."
-	@$(DVC) gc -r storage --all-branches --all-tags --all-commits --force
-	@echo ""
-	@echo "[OK] Garbage collection completada en remoto DVC."
-
+	@echo "==> Eliminando entorno completo de setup"
+	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv
+	@echo "[OK] Entorno eliminado. Proyecto vuelve a estado post-clone."
 
 
 
@@ -1018,10 +982,11 @@ ifeq ($(IMBALANCE_STRATEGY),rare_events)
 	@test -n "$(IMBALANCE_MAX_MAJ)" || \
 	  (echo "[ERROR] Debes especificar IMBALANCE_MAX_MAJ para rare_events"; exit 1)
 	@$(eval SET_LIST := $(SET_LIST) \
-		--set imbalance="{strategy: rare_events, max_majority_samples: $(IMBALANCE_MAX_MAJ)}" )
+		--set imbalance.strategy=rare_events \
+		--set imbalance.max_majority_samples=$(IMBALANCE_MAX_MAJ) )
 else
 	@$(eval SET_LIST := $(SET_LIST) \
-		--set imbalance="{strategy: none, max_majority_samples: null}" )
+		--set imbalance.strategy=none )
 endif
 	@$(MAKE) variant-generic PHASE=$(PHASE5) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
 	@echo "[OK] Variante $(VARIANT) creada con imbalance=$(IMBALANCE_STRATEGY)."
