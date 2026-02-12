@@ -1,0 +1,23 @@
+{
+  "phase": "02_prepareeventsds",
+  "variant": "v010",
+  "git_commit": "4ccfc8df40dea2f6b79e917d5cd6b9c5f7e94a69",
+  "generated_at": "2026-02-11T16:44:27.677010+01:00",
+  "dataset_events": "/Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/02_prepareeventsds/v010/02_prepareeventsds_dataset.parquet",
+  "parent_phase": "01_explore",
+  "parent_variant": "v001",
+  "input_dataset": "/Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v001/01_explore_dataset.parquet",
+  "Tu": 10.0,
+  "band_thresholds_pct": [
+    40,
+    60,
+    80
+  ],
+  "event_strategy": "transitions",
+  "nan_handling": "keep",
+  "n_rows_input": 3887242,
+  "n_rows_events": 3887242,
+  "n_event_types": 221,
+  "n_measures": 17,
+  "raw_file": "/Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v001/01_explore_dataset.parquet"
+}

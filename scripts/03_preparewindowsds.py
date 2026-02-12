@@ -25,7 +25,10 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import pyarrow as pa
+import pyarrow.parquet as pq
+from bisect import bisect_left
+from time import perf_counter
 import sys
 
 # ============================================================

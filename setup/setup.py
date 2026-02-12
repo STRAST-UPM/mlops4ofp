@@ -13,7 +13,8 @@ MAX_PYTHON = (3, 11)  # inclusivo
 
 def check_python_version():
     v = sys.version_info
-    if v < MIN_PYTHON or v > MAX_PYTHON:
+    v_mm = (v.major, v.minor)
+    if v_mm < MIN_PYTHON or v_mm > MAX_PYTHON:
         abort(
             f"Versión de Python no soportada: {v.major}.{v.minor}.{v.micro}\n"
             f"Se requiere Python >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]} "
@@ -75,6 +76,11 @@ def ensure_running_in_venv(argv):
     print("[INFO] Reejecutando setup dentro de .venv")
     run([str(VENV_PYTHON), __file__] + argv)
     sys.exit(0)
+
+def ensure_dvc_repo():
+    if not (ROOT / ".dvc").exists():
+        print("[INFO] Inicializando repositorio DVC")
+        run(["dvc", "init"])
 
 
 # --------------------------------------------------
@@ -272,6 +278,7 @@ def main():
     CONFIG_FILE.write_text(yaml.dump(cfg))
 
     create_env_sh(cfg)
+    ensure_dvc_repo()   
     setup_dvc_remote(cfg)
     setup_git_remote(cfg)
 

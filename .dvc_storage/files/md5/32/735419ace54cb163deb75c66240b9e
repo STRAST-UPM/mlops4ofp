@@ -1,0 +1,17 @@
+{
+  "phase": "01_explore",
+  "variant": "v001",
+  "git_commit": "c9d4d103675796cfa10a239338d4c77d6d2d7c24",
+  "generated_at": "2026-02-11T16:42:27.102847+01:00",
+  "dataset_explored": "/Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v001/01_explore_dataset.parquet",
+  "Tu": 10.0,
+  "nan_replacements_total": 42542,
+  "n_rows": 3887242,
+  "n_cols": 18,
+  "cleaning_strategy": "basic",
+  "nan_values": [
+    -999999
+  ],
+  "error_values_by_column": {},
+  "raw_file": "/Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/data/01-raw/01_explore_raw_01_explore_raw_raw.csv"
+}

@@ -454,7 +454,8 @@ class ParamsManager:
         # ---------------------------------------------------------
         # Validar parámetros antes de crear la variante
         # ---------------------------------------------------------
-        validate_params(self.phase, base_params, PROJECT_ROOT)
+        validate_params(self.phase, base_params, self.phase_dir.parents[1])
+        #PROJECT_ROOT)
 
         # ---------------------------------------------------------
         # Guardar params.yaml de la variante

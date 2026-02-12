@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Reporte F04 - v101</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .kpi { margin: 6px 0; }
+    ul { line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>Fase 04 — Target Engineering</h1>
+  <p><strong>Variante:</strong> v101</p>
+  <div class="kpi">Ventanas (entrada F03): 2895405</div>
+  <div class="kpi">Etiquetas 1: 850 (0.03%)</div>
+  <div class="kpi">Etiquetas 0: 2894555 (99.97%)</div>
+  <h2>Figuras</h2>
+  <ul>
+    <li><a href="figures/pw_events_all.png">Histograma PW (todas)</a></li>
+    <li><a href="figures/pw_events_pos.png">Histograma PW (positivas)</a></li>
+    <li><a href="figures/pw_events_neg.png">Histograma PW (negativas)</a></li>
+  </ul>
+</body>
+</html>

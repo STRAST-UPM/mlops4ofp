@@ -4,7 +4,6 @@
 # ============================================================
 # Esta fase:
 # - compone un paquete de sistema a partir de variantes F05
-# - selecciona modelos entrenados
 # - fija un régimen temporal común (valores, no semántica)
 # - incluye un replay de eventos reproducible
 # ============================================================
@@ -21,26 +20,6 @@ temporal:
   Tu: null                     # unidad temporal base
   OW: null                     # tamaño ventana 1
   PW: null                     # tamaño ventana 2
-
-# ------------------------------------------------------------
-# Modelos incluidos en el paquete
-# ------------------------------------------------------------
-# Lista plana de modelos seleccionados.
-# Cada modelo se identifica de forma única por su origen.
-#
-# Ejemplo:
-# models:
-#   - f04_id: f04_v012
-#     model_id: m03
-#     source_f05: v042
-#
-models: []                     # — OBLIGATORIO (≥1 modelo)
-
-# ------------------------------------------------------------
-# Replay de eventos
-# ------------------------------------------------------------
-replay:
-  dataset_id: null             # dataset ancestro (normalmente F02)
 
 # ------------------------------------------------------------
 # Notas documentales

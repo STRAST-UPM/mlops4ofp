@@ -150,6 +150,7 @@ param_rules:
 
   "05_modeling":
     _free_keys: ["search_space"]
+
     parent_variant:
       type: string
       required: true
@@ -183,9 +184,6 @@ param_rules:
       type: dict
       required: true
 
-    candidate_selection:
-      type: dict
-      required: true
 
   "06_packaging":
 
@@ -196,15 +194,7 @@ param_rules:
 
     temporal:
       type: dict
-      required: true
-
-    models:
-      type: list
-      required: true
-
-    replay:
-      type: dict
-      required: true
+      required: false
 
     notes:
       type: string

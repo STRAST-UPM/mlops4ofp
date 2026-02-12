@@ -3,7 +3,39 @@
 # (MLflow, etc.)
 ############################################
 
-PYTHON ?= python
+# ============================================================
+# Detección automática de Python 3.11
+# ============================================================
+
+# Permite override manual: make PYTHON=...
+PYTHON ?=
+
+# Si no se ha especificado PYTHON, intentamos autodetectar
+ifeq ($(PYTHON),)
+
+# Intentar python3.11 explícito
+PYTHON := $(shell command -v python3.11 2>/dev/null)
+
+# Si no existe, probar rutas típicas (macOS Intel / Apple Silicon)
+ifeq ($(PYTHON),)
+PYTHON := $(shell test -x /usr/local/bin/python3.11 && echo /usr/local/bin/python3.11)
+endif
+
+ifeq ($(PYTHON),)
+PYTHON := $(shell test -x /opt/homebrew/bin/python3.11 && echo /opt/homebrew/bin/python3.11)
+endif
+
+# Si sigue vacío, error explícito
+ifeq ($(PYTHON),)
+$(error No se encontró python3.11 en el sistema. \
+Instálalo (brew install python@3.11) \
+o ejecuta make PYTHON=/ruta/a/python3.11)
+endif
+
+endif
+
+$(info [INFO] Usando intérprete Python: $(PYTHON))
+
 
 # Si existe .mlops4ofp/env.sh, se incluye automáticamente
 # y sus variables pasan a todos los comandos make.
@@ -62,9 +94,9 @@ check-setup:
 	@.venv/bin/python setup/check_setup.py
 
 clean-setup:
-	@echo "==> Eliminando configuración de setup"
-	@rm -rf .mlops4ofp
-	@echo "[OK] Setup eliminado. El proyecto vuelve a estado post-clone."
+	@echo "==> Eliminando configuración de setup y DVC local"
+	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store
+	@echo "[OK] Setup y DVC local eliminado. El proyecto vuelve a estado post-clone."
 
 ############################################
 # ADMIN — DVC GARBAGE COLLECTION (PELIGRO)
@@ -249,22 +281,6 @@ remove-phase-all:
 
 	@echo "[OK] Fase $(PHASE) eliminada completamente (modo seguro)"
 
-define CHECK_MODELS_YAML
-python - << 'EOF'
-import sys, yaml
-try:
-    data = yaml.safe_load("""$(MODELS)""")
-    if not isinstance(data, dict) or not data:
-        raise ValueError("MODELS debe ser un diccionario no vacío")
-    for obj, models in data.items():
-        if not isinstance(models, list) or not models:
-            raise ValueError(f"El objetivo {obj} no tiene modelos válidos")
-    print("[OK] MODELS válido")
-except Exception as e:
-    print(f"[ERROR] MODELS inválido: {e}", file=sys.stderr)
-    sys.exit(1)
-EOF
-endef
 
 
 
@@ -864,84 +880,235 @@ VARIANTS_DIR_05 = executions/$(PHASE5)
 NOTEBOOK5=notebooks/05_modeling.ipynb
 SCRIPT5=scripts/05_modeling.py
 
+# ============================================================
+# FASE 05 — MODELING — configuración desde make
+# ============================================================
+IMBALANCE_STRATEGY ?= none          # none | auto | rare_events
+IMBALANCE_MAX_NEG ?=                # p.ej. 200000
+
+# Construimos un dict YAML para override de imbalance
+# Ejemplo de resultado:
+#   {strategy: rare_events, max_negatives: 200000, keep_all_positives: true}
+ifeq ($(IMBALANCE_STRATEGY),rare_events)
+  IMBALANCE_DICT := "{strategy: rare_events, max_negatives: $(IMBALANCE_MAX_NEG), keep_all_positives: true}"
+else
+  IMBALANCE_DICT := "{strategy: $(IMBALANCE_STRATEGY)}"
+endif
+
 
 ############################################
-# 1. EJECUCIÓN DEL NOTEBOOK
+# FUNCIÓN INTERNA: REGISTRO MLFLOW
+############################################
+define REGISTER_MLFLOW
+META=$(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json; \
+test -f $$META || (echo "[ERROR] Metadata no encontrada"; exit 1); \
+\
+read BEST_RECALL MODEL_PATH PARENT MODEL_FAMILY OLD_RUN <<EOF
+$$($(PYTHON) - <<EOF2
+import json
+with open("$$META") as f:
+    d=json.load(f)
+print(
+    d["best_val_recall"],
+    d["model_path"],
+    d["parent_variant"],
+    d["model_family"],
+    d.get("mlflow",{}).get("run_id","")
+)
+EOF2
+)
+EOF
+\
+EXP_NAME="F05_$$PARENT"; \
+\
+if [ -n "$$OLD_RUN" ] && [ "$$OLD_RUN" != "null" ]; then \
+  echo "==> Eliminando run anterior $$OLD_RUN"; \
+  mlflow runs delete --run-id $$OLD_RUN || true; \
+fi; \
+\
+EXP_ID=$$(mlflow experiments list --format json | \
+$(PYTHON) - <<EOF
+import sys,json,os
+exp_name=os.environ.get("EXP_NAME")
+data=json.load(sys.stdin)
+for e in data:
+    if e["name"]==exp_name:
+        print(e["experiment_id"])
+        break
+EOF
+); \
+\
+if [ -z "$$EXP_ID" ]; then \
+  EXP_ID=$$(mlflow experiments create --experiment-name $$EXP_NAME \
+    --format json | \
+    $(PYTHON) - <<EOF
+import sys,json
+print(json.load(sys.stdin)["experiment_id"])
+EOF
+  ); \
+fi; \
+\
+NEW_RUN=$$(mlflow runs create --experiment-id $$EXP_ID \
+  --run-name "$(VARIANT)" --format json | \
+  $(PYTHON) - <<EOF
+import sys,json
+print(json.load(sys.stdin)["run"]["info"]["run_id"])
+EOF
+); \
+\
+mlflow runs log-metric --run-id $$NEW_RUN best_val_recall $$BEST_RECALL; \
+mlflow runs log-param --run-id $$NEW_RUN variant $(VARIANT); \
+mlflow runs log-param --run-id $$NEW_RUN parent_variant $$PARENT; \
+mlflow runs log-param --run-id $$NEW_RUN model_family $$MODEL_FAMILY; \
+mlflow runs log-artifact --run-id $$NEW_RUN $$MODEL_PATH; \
+\
+$(PYTHON) - <<EOF
+import json
+with open("$$META") as f:
+    d=json.load(f)
+d.setdefault("mlflow",{})
+d["mlflow"]["run_id"]="$$NEW_RUN"
+d["mlflow"]["published"]=False
+with open("$$META","w") as f:
+    json.dump(d,f,indent=2)
+EOF
+\
+echo "[OK] MLflow registrado en experimento $$EXP_NAME: $$NEW_RUN"
+endef
+
+
+
+
+############################################
+# 1. EJECUCIÓN DEL NOTEBOOK + REGISTRO
 ############################################
 nb5-run: check-variant-format
 	$(MAKE) nb-run-generic PHASE=$(PHASE5) NOTEBOOK=$(NOTEBOOK5) VARIANT=$(VARIANT)
+	@echo "==> Registrando experimento MLflow (desde notebook)"
+	@$(REGISTER_MLFLOW)
 
 
 ############################################
-# 2. EJECUCIÓN DE LA SCRIPT
+# 2. EJECUCIÓN DE LA SCRIPT + REGISTRO
 ############################################
 script5-run: check-variant-format
 	$(MAKE) script-run-generic PHASE=$(PHASE5) SCRIPT=$(SCRIPT5) VARIANT=$(VARIANT)
+	@echo "==> Registrando experimento MLflow (desde script)"
+	@$(REGISTER_MLFLOW)
 
 
 ############################################
-# 3. CREAR VARIANTE DE LA FASE 05
+# 3. CREAR VARIANTE (con política imbalance opcional)
 ############################################
-# Uso:
-# make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_nn
-#
-# Los valores por defecto (AutoML, métricas, etc.)
-# se toman de base_params.yaml y pueden modificarse
-# editando params.yaml tras la creación de la variante.
+
+IMBALANCE_STRATEGY ?= none
+IMBALANCE_MAX_MAJ ?=
 
 variant5: check-variant-format
-	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN (variante de F04)"; exit 1)
-	@test -n "$(MODEL_FAMILY)" || (echo "[ERROR] Debes especificar MODEL_FAMILY (familias soportadas: sequence_embedding, dense_bow, cnn1d)"; exit 1)
-	@echo "==> Preparando parámetros específicos para Fase 05 (Modeling)"
+	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN"; exit 1)
+	@test -n "$(MODEL_FAMILY)" || (echo "[ERROR] Debes especificar MODEL_FAMILY"; exit 1)
+	@echo "==> Creando variante $(PHASE5):$(VARIANT)"
 	@$(eval SET_LIST := \
 		--set parent_variant=$(PARENT) \
 		--set model_family=$(MODEL_FAMILY) )
+	# --------------------------------------------------------
+	# Política de imbalance explícita
+	# --------------------------------------------------------
+ifeq ($(IMBALANCE_STRATEGY),rare_events)
+	@test -n "$(IMBALANCE_MAX_MAJ)" || \
+	  (echo "[ERROR] Debes especificar IMBALANCE_MAX_MAJ para rare_events"; exit 1)
+	@$(eval SET_LIST := $(SET_LIST) \
+		--set imbalance="{strategy: rare_events, max_majority_samples: $(IMBALANCE_MAX_MAJ)}" )
+else
+	@$(eval SET_LIST := $(SET_LIST) \
+		--set imbalance="{strategy: none, max_majority_samples: null}" )
+endif
 	@$(MAKE) variant-generic PHASE=$(PHASE5) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
-	@echo "[OK] Variante $(VARIANT) creada para Fase 05."
+	@echo "[OK] Variante $(VARIANT) creada con imbalance=$(IMBALANCE_STRATEGY)."
+
 
 
 ############################################
-# 4. PUBLICAR VARIANTE DE FASE 05
+# 4. PUBLICAR + MARCAR COMO PUBLISHED
 ############################################
-# En F05 se publican:
-# - params.yaml
-# - <phase>_params.json
-# - <phase>_metadata.json   (OBLIGATORIO)
-# - artefactos de modelos y splits (parquet / h5 / json)
-# - informes html
-
 publish5: check-variant-format
+	@if [ -z "$$RUN_ID" ] || [ "$$RUN_ID" = "null" ]; then \
+  		echo "[ERROR] No existe run MLflow registrado. Ejecuta script5-run o nb5-run primero."; \
+  		exit 1; \
+	fi
 	@echo "==> Validando variante $(PHASE5):$(VARIANT)"
 	@test -f $(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json || \
-	  (echo "[ERROR] Falta $(PHASE5)_metadata.json (obligatorio en F05)"; exit 1)
+	  (echo "[ERROR] Falta metadata"; exit 1)
+
+	@META=$(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json; \
+	RUN_ID=$$($(PYTHON) -c "import json; p='$$META'; d=json.load(open(p)); print(d.get('mlflow',{}).get('run_id',''))"); \
+	if [ -n "$$RUN_ID" ] && [ "$$RUN_ID" != "null" ]; then \
+	  mlflow runs set-tag --run-id $$RUN_ID published true; \
+	  $(PYTHON) -c "import json; p='$$META'; d=json.load(open(p)); d.setdefault('mlflow',{}); d['mlflow']['published']=True; json.dump(d, open(p,'w'), indent=2)"; \
+	  echo "[OK] Run marcado como published=true"; \
+	fi
+
 	$(MAKE) publish-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) \
 		PUBLISH_EXTS="parquet json html h5" VARIANT=$(VARIANT)
 
 
 ############################################
-# 5. ELIMINAR VARIANTE FASE 05
+# 5. ELIMINAR VARIANTE FASE 05 + BORRAR RUN MLFLOW
+############################################
+############################################
+# 5. ELIMINAR VARIANTE FASE 05 + LIMPIEZA MLFLOW COMPLETA
 ############################################
 remove5: check-variant-format
+	@META=$(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json; \
+	if [ -f $$META ]; then \
+	  RUN_ID=$$($(PYTHON) -c "import json; d=json.load(open('$$META')); print(d.get('mlflow',{}).get('run_id',''))"); \
+	  PARENT=$$($(PYTHON) -c "import json; d=json.load(open('$$META')); print(d.get('parent_variant',''))"); \
+	  if [ -n "$$RUN_ID" ] && [ "$$RUN_ID" != "null" ]; then \
+	    echo "==> Eliminando run MLflow $$RUN_ID"; \
+	    mlflow runs delete --run-id $$RUN_ID || true; \
+	  fi; \
+	  EXP_NAME="F05_$$PARENT"; \
+	  EXP_ID=$$(mlflow experiments list --format json | \
+	    $(PYTHON) -c "import sys,json,os; exp_name=os.environ.get('EXP_NAME'); data=json.load(sys.stdin); print(next((e['experiment_id'] for e in data if e['name']==exp_name), ''))" \
+	  ); \
+	  if [ -n "$$EXP_ID" ]; then \
+	    COUNT=$$(mlflow runs list --experiment-id $$EXP_ID --format json | \
+	      $(PYTHON) -c "import sys,json; runs=json.load(sys.stdin); active=[r for r in runs if r['info']['lifecycle_stage']=='active']; print(len(active))" \
+	    ); \
+	    if [ "$$COUNT" = "0" ]; then \
+	      echo "==> Eliminando experimento MLflow $$EXP_NAME (vacío)"; \
+	      mlflow experiments delete --experiment-id $$EXP_ID || true; \
+	    fi; \
+	  fi; \
+	fi
+
 	$(MAKE) remove-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) VARIANT=$(VARIANT)
 
+
 remove5-all:
-	$(MAKE) remove-phase-all PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05)
+	@echo "==> Eliminando TODAS las variantes de Fase 05 (modo SEGURO)"
+	@test -d "$(VARIANTS_DIR_05)" || \
+	  (echo "[INFO] No existe $(VARIANTS_DIR_05). Nada que borrar."; exit 0)
+
+	@for v in $$(ls $(VARIANTS_DIR_05) | grep '^v[0-9]\{3\}$$'); do \
+	  echo "----> Eliminando $(PHASE5):$$v"; \
+	  $(MAKE) remove5 VARIANT=$$v || exit 1; \
+	done
+
+	@echo "[OK] Fase 05 eliminada completamente (incluye MLflow)"
 
 
 ############################################
 # 6. CHEQUEO DE RESULTADOS
 ############################################
-# En F05 no se valida un único dataset, sino:
+# En F05 se valida:
 # - existencia de metadata
-# - al menos un candidato si se ha ejecutado la fase
+# - existencia de modelo final
 
 script5-check-results: check-variant-format
 	@test -f $(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json || \
 	  (echo "[FAIL] Falta $(PHASE5)_metadata.json"; exit 1)
 	@echo "[OK] Metadata de Fase 05 presente"
-	@test -d $(VARIANTS_DIR_05)/$(VARIANT)/candidates || \
-	  (echo "[WARN] No existe carpeta candidates (¿fase no ejecutada aún?)"; exit 0)
-	@echo "[OK] Carpeta candidates presente"
 
 
 ############################################
@@ -967,7 +1134,23 @@ help5:
 	@echo "==============================================="
 	@echo ""
 	@echo " CREAR VARIANTE (requiere PARENT de F04):"
-	@echo "   make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_nn"
+	@echo ""
+	@echo "   make variant5 VARIANT=v301 \\"
+	@echo "        PARENT=v201 \\"
+	@echo "        MODEL_FAMILY=dense_bow"
+	@echo ""
+	@echo " CREAR VARIANTE CON RARE EVENTS:"
+	@echo ""
+	@echo "   make variant5 VARIANT=v302 \\"
+	@echo "        PARENT=v201 \\"
+	@echo "        MODEL_FAMILY=dense_bow \\"
+	@echo "        IMBALANCE_STRATEGY=rare_events \\"
+	@echo "        IMBALANCE_MAX_MAJ=200000"
+	@echo ""
+	@echo " NOTA:"
+	@echo " - En problemas binarios, se asume label=1 como clase minoritaria."
+	@echo " - rare_events mantiene todos los positivos (label=1)"
+	@echo "   y limita el número de negativos."
 	@echo ""
 	@echo " EJECUTAR NOTEBOOK:"
 	@echo "   make nb5-run VARIANT=v301"
@@ -982,17 +1165,19 @@ help5:
 	@echo " PUBLICAR:"
 	@echo "   make publish5 VARIANT=v301"
 	@echo ""
-	@echo " LIMPIAR / ELIMINAR:"
+	@echo " ELIMINAR:"
 	@echo "   make remove5 VARIANT=v301"
 	@echo "   make clean5-all"
 	@echo ""
-	@echo " NOTAS:"
-	@echo " - Cada variante F05 explora UNA familia de modelos."
-	@echo " - La selección de candidatos se basa en umbral de métrica primaria."
-	@echo " - Si ningún modelo supera el umbral, se conserva el mejor."
-	@echo " - La metadata es obligatoria para publicar la variante."
+	@echo " COMPORTAMIENTO:"
+	@echo " - Cada variante explora UNA familia de modelos."
+	@echo " - Se prueban hasta max_trials configuraciones internas."
+	@echo " - Se selecciona automáticamente el modelo con mejor"
+	@echo "   métrica primaria en validación."
+	@echo " - Se materializa UN único modelo final por variante."
 	@echo ""
 	@echo "==============================================="
+
 
 ############################################
 # FASE 06 — PACKAGING
@@ -1010,31 +1195,21 @@ VARIANTS_DIR_06 := executions/$(PHASE6)
 variant6: check-variant-format
 	@echo "==> Creando variante F06 $(VARIANT)"
 
-	@if [ -z "$(MODELS)" ]; then \
-		echo "[ERROR] MODELS es obligatorio en F06"; exit 1; \
-	fi
 	@if [ -z "$(PARENTS_F05)" ]; then \
 		echo "[ERROR] PARENTS_F05 es obligatorio"; exit 1; \
 	fi
 
-	@echo "==> Validando MODELS"
-	@$(CHECK_MODELS_YAML)
-
 	# Tomamos el primer parent F05 como referencia de herencia
 	$(eval FIRST_F05 := $(word 1,$(PARENTS_F05)))
 
-	# Resolver F04 y F03 a partir de F05 (trazabilidad)
+	# Resolver F04 y F03 a partir de F05
 	$(eval F04_FROM_F05 := $(shell yq '.parent_variant' executions/05_modeling/$(FIRST_F05)/params.yaml))
 	$(eval F03_FROM_F04 := $(shell yq '.parent_variant' executions/04_targetengineering/$(F04_FROM_F05)/params.yaml))
 
-	# Herencia por defecto del régimen temporal (copia literal)
+	# Herencia por defecto del régimen temporal desde F03
 	$(eval Tu_FINAL := $(if $(Tu),$(Tu),$(shell yq '.temporal.Tu' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
 	$(eval OW_FINAL := $(if $(OW),$(OW),$(shell yq '.temporal.OW' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
 	$(eval PW_FINAL := $(if $(PW),$(PW),$(shell yq '.temporal.PW' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml)))
-
-	# Resolver F02 para el replay (herencia por defecto)
-	$(eval F02_FROM_F03 := $(shell yq '.parent_variant' executions/03_preparewindowsds/$(F03_FROM_F04)/params.yaml))
-	$(eval REPLAY_DATASET_FINAL := $(if $(REPLAY_DATASET),$(REPLAY_DATASET),$(F02_FROM_F03)))
 
 	$(PYTHON) mlops4ofp/tools/params_manager.py \
 		create-variant \
@@ -1043,9 +1218,7 @@ variant6: check-variant-format
 		--set parent_variants_f05="$(PARENTS_F05)" \
 		--set temporal.Tu=$(Tu_FINAL) \
 		--set temporal.OW=$(OW_FINAL) \
-		--set temporal.PW=$(PW_FINAL) \
-		--set models='$(MODELS)' \
-		--set replay.dataset_id=$(REPLAY_DATASET_FINAL)
+		--set temporal.PW=$(PW_FINAL)
 
 	@echo "[OK] Variante F06 $(VARIANT) creada"
 
@@ -1126,7 +1299,6 @@ clean6:
 # Ayuda
 # ------------------------------------------------------------
 help6:
-help6:
 	@echo "=================================================="
 	@echo " F06 — PACKAGING (sistema agnóstico)"
 	@echo "=================================================="
@@ -1150,22 +1322,20 @@ help6:
 	@echo "Uso:"
 	@echo "  make variant6 VARIANT=vNNN \\"
 	@echo "       PARENTS_F05=\"vAAA vBBB\" \\"
-	@echo "       MODELS=\"<yaml>\" \\"
-	@echo "       [Tu=<valor>] [OW=<valor>] [PW=<valor>] \\"
-	@echo "       [REPLAY_DATASET=<f02_variant>]"
+	@echo "       [Tu=<valor>] [OW=<valor>] [PW=<valor>]"
 	@echo ""
 	@echo "Parámetros obligatorios:"
 	@echo "  VARIANT       Nombre de la variante (vNNN)"
 	@echo "  PARENTS_F05   Lista de variantes F05 (separadas por espacios)"
-	@echo "  MODELS        Selección explícita de modelos (YAML)"
 	@echo ""
 	@echo "Parámetros opcionales (override):"
 	@echo "  Tu, OW, PW    Valores temporales del sistema"
-	@echo "  REPLAY_DATASET  Dataset de replay (variante F02)"
 	@echo ""
 	@echo "Notas:"
-	@echo "  - No se admiten inputs RAW en F06."
-	@echo "  - Todos los valores finales quedan sellados en params.yaml."
+	@echo "  - F06 ya no selecciona modelos manualmente."
+	@echo "  - Cada variante F05 aporta su modelo oficial."
+	@echo "  - F06 solo compone y sella el sistema."
+
 	@echo "=================================================="
 	@echo "  make nb6-run VARIANT=vNNN"
 	@echo "  make script6-run VARIANT=vNNN"
@@ -1187,6 +1357,63 @@ help6:
 # ==========================================
 # AYUDA GLOBAL
 # ==========================================
+
+############################################
+# UI unificada (MLflow + DVC)
+############################################
+
+############################################
+# UI unificada (portable)
+############################################
+
+ui:
+	@echo "==> UI MLOps4OFP"
+	@if [ ! -f .mlops4ofp/setup.yaml ]; then \
+		echo "[ERROR] Setup no ejecutado."; \
+		exit 1; \
+	fi; \
+	MLFLOW_BACKEND=$$($(PYTHON) -c "import yaml, pathlib; \
+cfg=yaml.safe_load(pathlib.Path('.mlops4ofp/setup.yaml').read_text()); \
+print(cfg.get('mlflow',{}).get('backend','local'))"); \
+	DVC_BACKEND=$$($(PYTHON) -c "import yaml, pathlib; \
+cfg=yaml.safe_load(pathlib.Path('.mlops4ofp/setup.yaml').read_text()); \
+print(cfg.get('dvc',{}).get('backend','local'))"); \
+	open_url() { \
+		URL=$$1; \
+		echo "[INFO] Abriendo $$URL"; \
+		case "$$(uname)" in \
+			Darwin*) open "$$URL" ;; \
+			Linux*) xdg-open "$$URL" >/dev/null 2>&1 || sensible-browser "$$URL" ;; \
+			MINGW*|MSYS*|CYGWIN*) start "$$URL" ;; \
+			*) echo "[WARN] Plataforma desconocida. URL: $$URL" ;; \
+		esac; \
+	}; \
+	if [ "$$MLFLOW_BACKEND" = "dagshub" ]; then \
+		URL=$$($(PYTHON) -c "import yaml, pathlib; \
+cfg=yaml.safe_load(pathlib.Path('.mlops4ofp/setup.yaml').read_text()); \
+print(cfg['mlflow']['tracking_uri'])"); \
+		open_url "$$URL"; \
+	else \
+		echo "[INFO] Arrancando MLflow local en http://127.0.0.1:5000"; \
+		. .mlops4ofp/env.sh && \
+		$(PYTHON) -m mlflow ui --host 127.0.0.1 --port 5000 >/dev/null 2>&1 & \
+		sleep 2; \
+		open_url "http://127.0.0.1:5000"; \
+	fi; \
+	if [ "$$DVC_BACKEND" = "dagshub" ]; then \
+		REPO=$$($(PYTHON) -c "import yaml, pathlib; \
+cfg=yaml.safe_load(pathlib.Path('.mlops4ofp/setup.yaml').read_text()); \
+print(cfg['dvc']['repo'])"); \
+		open_url "https://dagshub.com/$$REPO"; \
+	else \
+		echo "[INFO] Storage local en .dvc_storage"; \
+	fi
+
+
+
+
+
+
 
 clean-all-all:
 	@echo "==> Limpiando todas las fases"

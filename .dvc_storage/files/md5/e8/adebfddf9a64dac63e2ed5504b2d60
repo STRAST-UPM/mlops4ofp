@@ -1,0 +1,38 @@
+{
+  "phase": "04_targetengineering",
+  "variant": "v101",
+  "problem": {
+    "type": "binary_classification",
+    "sequence_based": true,
+    "target_definition": {
+      "operator": "OR",
+      "events": [
+        "Battery_Active_Power_0_40-to-80_100",
+        "Battery_Active_Power_40_60-to-80_100"
+      ]
+    }
+  },
+  "dataset": {
+    "num_samples": 2895405,
+    "num_positive": 850,
+    "num_negative": 2894555,
+    "positive_ratio": 0.00029356860266525756
+  },
+  "sequence_statistics": {
+    "avg_sequence_length": 57.21130619032571,
+    "min_sequence_length": 0,
+    "max_sequence_length": 412,
+    "p95_sequence_length": 189.0
+  },
+  "vocabulary": {
+    "num_unique_events": 124
+  },
+  "constraints": {
+    "framework": "tensorflow",
+    "deployment": [
+      "tflite",
+      "tflite-micro"
+    ],
+    "target_device": "esp32-class-mcu"
+  }
+}
