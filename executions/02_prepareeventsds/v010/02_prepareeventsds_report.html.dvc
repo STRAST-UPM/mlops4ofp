@@ -1,0 +1,5 @@
+outs:
+- md5: 79b61afbbdfa7dbc23809f48d3ef1cb9
+  size: 72316
+  hash: md5
+  path: 02_prepareeventsds_report.html

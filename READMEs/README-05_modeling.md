@@ -11,7 +11,7 @@ El notebook y la script de esta fase realizan tareas conceptualmente equivalente
 - Entrenar modelos predictivos a partir del dataset etiquetado (F04).
 - Explorar automáticamente un **espacio de búsqueda acotado (AutoML ligero)** por variante.
 - Evaluar modelos con métricas alineadas con el problema (recall prioritario).
-- Seleccionar **uno o varios candidatos válidos** por variante.
+- Seleccionar automáticamente un único modelo final por variante.
 - Registrar artefactos, métricas y decisiones para trazabilidad completa.
 - Preparar modelos **edge‑ready** para fases posteriores (exportación / inferencia).
 
@@ -25,8 +25,6 @@ El notebook y la script de esta fase realizan tareas conceptualmente equivalente
   - `executions/05_modeling/base_params.yaml`
 - Variantes y artefactos:
   - `executions/05_modeling/<VARIANT>/`
-- Candidatos entrenados:
-  - `executions/05_modeling/<VARIANT>/candidates/`
 
 ---
 
@@ -122,27 +120,16 @@ evaluation:
 ```yaml
 metrics:
   primary: recall
-  secondary:
+  report:
     - precision
     - f1
     - confusion_matrix
 ```
 
-- La métrica primaria gobierna selección de candidatos.
+- La métrica primaria gobierna selección de candidatos. Las métricas secundarias pueden registrarse para análisis adicional.
 
 ---
 
-### Selección de candidatos
-```yaml
-candidate_selection:
-  threshold: 0.80
-  policy: keep_all_above | fallback_best
-```
-
-- `keep_all_above`: conserva todos los modelos que superan el umbral.
-- `fallback_best`: si ninguno lo supera, conserva el mejor.
-
----
 
 ### Espacios de búsqueda
 El bloque `search_space` define los hiperparámetros por familia.  
@@ -163,19 +150,33 @@ search_space:
 
 En `executions/05_modeling/<VARIANT>/`:
 
-- `05_modeling_metadata.json` **(obligatorio)**
-  - Resumen de entrenamiento, métricas y selección.
 - `05_modeling_params.json` o `params.yaml`
   - Parámetros efectivos usados.
-- `candidates/`
-  - Un subdirectorio por modelo candidato:
-    - pesos (`.h5`, `.keras`, etc.)
-    - métricas
-    - configuración del modelo
+- `model_final.h5`
+  Modelo único seleccionado automáticamente.
+- `05_modeling_metadata.json`
+  Incluye:
+    - best_val_recall
+    - best_hyperparameters
+    - trials_summary
+    - información mlflow (run_id, published)
 - `05_modeling_report.html`
   - Informe consolidado del proceso.
 
 La presencia de `05_modeling_metadata.json` es **condición necesaria para publicar**.
+
+---
+
+
+## Integración con MLflow
+
+Cada variante F05 se registra automáticamente en MLflow.
+
+- Experimento: F05_<parent_variant>
+- Run: nombre = <VARIANT>
+- Re-ejecución: reemplaza el run anterior
+- publish5: marca el run como published=true
+- remove5: elimina el run y el experimento si queda vacío
 
 ---
 
@@ -184,6 +185,7 @@ La presencia de `05_modeling_metadata.json` es **condición necesaria para publi
 ### Crear variante
 ```bash
 make variant5 VARIANT=v301 PARENT=v201 MODEL_FAMILY=dense_bow
+make variant5 VARIANT=v111 PARENT=v101 MODEL_FAMILY=dense_bow IMBALANCE_STRATEGY=rare_events IMBALANCE_MAX_MAJ=20000
 ```
 
 ---
@@ -201,7 +203,7 @@ make nb5-run VARIANT=v301
 make script5-run VARIANT=v301
 ```
 - Ejecución reproducible.
-- Genera candidatos y artefactos finales.
+- Genera experimentos internos y selecciona automáticamente el mejor modelo.
 
 ---
 
@@ -229,7 +231,7 @@ make clean5-all
 ```
 
 - `remove5`: elimina una variante (solo si no tiene hijos).
-- `clean5-all`: limpieza administrativa (no respeta trazabilidad).
+- `remove5-all`: elimina todas las varianted (solo si no tienen hijos).
 
 ---
 

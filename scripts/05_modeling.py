@@ -3,15 +3,12 @@
 Fase 05 — Modeling
 
 Entrena modelos para una única familia por variante.
-Familias soportadas:
-- sequence_embedding
-- dense_bow
-- cnn1d
 
 Produce:
-- experiments/  → todos los trials (auditoría)
-- candidates/   → modelos que superan criterio
-- best/         → modelo único recomendado
+- experiments/              → auditoría de trials
+- model_final.h5            → modelo único seleccionado
+- splits.parquet            → índices train/val/test
+- 05_modeling_metadata.json → metadata enriquecida
 """
 
 import sys
@@ -28,7 +25,7 @@ import pandas as pd
 import yaml
 
 # ============================================================
-# TensorFlow runtime stabilization (macOS / CPU)
+# TensorFlow runtime stabilization
 # ============================================================
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["TF_NUM_INTRAOP_THREADS"] = "1"
@@ -38,9 +35,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.keras.optimizers import legacy as legacy_optimizers
 
-from sklearn.metrics import precision_recall_curve, confusion_matrix
-import matplotlib.pyplot as plt
 
 # ============================================================
 # BOOTSTRAP
@@ -56,9 +52,6 @@ else:
 
 sys.path.insert(0, str(ROOT))
 
-# ============================================================
-# IMPORTS PROYECTO
-# ============================================================
 from mlops4ofp.tools.run_context import (
     detect_execution_dir,
     detect_project_root,
@@ -68,7 +61,7 @@ from mlops4ofp.tools.run_context import (
 from mlops4ofp.tools.params_manager import ParamsManager
 from mlops4ofp.tools.traceability import write_metadata
 from mlops4ofp.tools.artifacts import get_git_hash
-from mlops4ofp.tools.figures import save_figure
+
 
 # ============================================================
 # UTILIDADES
@@ -82,30 +75,65 @@ def compute_class_weights(y):
     return {0: 1.0, 1: neg / pos}
 
 
+def apply_rare_events(df, imbalance_cfg, seed):
+    """
+    Política rare_events:
+    - Asume label=1 como clase minoritaria.
+    - Mantiene TODOS los positivos.
+    - Limita número de negativos a max_majority_samples.
+    """
+    strategy = imbalance_cfg.get("strategy", "none")
+
+    if strategy != "rare_events":
+        return df, {"strategy": "none"}
+
+    max_majority = imbalance_cfg.get("max_majority_samples")
+
+    if max_majority is None:
+        return df, {
+            "strategy": "rare_events",
+            "note": "max_majority_samples=None → no reducción aplicada"
+        }
+
+    df_pos = df[df["label"] == 1]
+    df_neg = df[df["label"] == 0]
+
+    n_pos_before = len(df_pos)
+    n_neg_before = len(df_neg)
+
+    n_neg_sample = min(max_majority, n_neg_before)
+    df_neg_sample = df_neg.sample(n=n_neg_sample, random_state=seed)
+
+    df_new = pd.concat([df_pos, df_neg_sample])
+    df_new = df_new.sample(frac=1.0, random_state=seed)
+
+    info = {
+        "strategy": "rare_events",
+        "n_pos_before": int(n_pos_before),
+        "n_neg_before": int(n_neg_before),
+        "n_pos_after": int(len(df_pos)),
+        "n_neg_after": int(n_neg_sample),
+    }
+
+    return df_new, info
+
+
+
+
+
 def pad_sequences(seqs, max_len, pad_value=0):
     out = np.full((len(seqs), max_len), pad_value, dtype=np.int32)
     for i, s in enumerate(seqs):
-        if not s:
-            continue
         trunc = s[-max_len:]
         out[i, -len(trunc):] = trunc
     return out
 
 
-def check_split_feasibility(y_train, y_val):
-    issues = []
-    if y_train.sum() == 0:
-        issues.append("train split sin positivos")
-    if y_val.sum() == 0:
-        issues.append("val split sin positivos")
-    return issues
-
-
 # ============================================================
-# FAMILIAS DE MODELOS
+# FAMILIAS
 # ============================================================
 
-def vectorize_dense_bow(df, params):
+def vectorize_dense_bow(df):
     sequences = df["OW_events"].tolist()
     y = df["label"].values.astype(np.int32)
 
@@ -133,12 +161,12 @@ def build_dense_bow_model(aux, hp):
     return model
 
 
-def vectorize_sequence(df, params):
+def vectorize_sequence(df):
     sequences = df["OW_events"].tolist()
     y = df["label"].values.astype(np.int32)
 
     vocab = sorted(set(ev for s in sequences for ev in s))
-    index = {ev: i + 1 for i, ev in enumerate(vocab)}  # 0 = PAD
+    index = {ev: i + 1 for i, ev in enumerate(vocab)}
 
     seqs_idx = [[index[e] for e in s] for s in sequences]
     max_len = int(np.percentile([len(s) for s in seqs_idx], 95))
@@ -175,7 +203,6 @@ def build_cnn1d_model(aux, hp):
         layers.Embedding(
             input_dim=aux["vocab_size"] + 1,
             output_dim=hp["embed_dim"],
-            mask_zero=False,
         )
     )
     model.add(
@@ -198,19 +225,13 @@ def build_cnn1d_model(aux, hp):
 
 
 MODEL_FAMILIES = {
-    "dense_bow": {
-        "vectorize": vectorize_dense_bow,
-        "build_model": build_dense_bow_model,
-    },
-    "sequence_embedding": {
-        "vectorize": vectorize_sequence,
-        "build_model": build_sequence_embedding_model,
-    },
-    "cnn1d": {
-        "vectorize": vectorize_sequence,
-        "build_model": build_cnn1d_model,
-    },
+    "dense_bow": (vectorize_dense_bow, build_dense_bow_model),
+    "sequence_embedding": (vectorize_sequence, build_sequence_embedding_model),
+    "cnn1d": (vectorize_sequence, build_cnn1d_model),
 }
+
+
+
 
 # ============================================================
 # MAIN
@@ -233,45 +254,72 @@ def main(variant: str):
     )
     print_run_context(ctx)
 
-    with open(variant_root / "params.yaml", "r", encoding="utf-8") as f:
+    with open(variant_root / "params.yaml", "r") as f:
         params = yaml.safe_load(f)
 
-    parent_variant_f04 = params["parent_variant"]
+    parent_variant = params["parent_variant"]
     model_family = params["model_family"]
 
-    family = MODEL_FAMILIES[model_family]
-    vectorize_fn = family["vectorize"]
-    build_model_fn = family["build_model"]
+    vectorize_fn, build_model_fn = MODEL_FAMILIES[model_family]
 
-    automl_cfg = params["automl"]
-    training_cfg = params["training"]
-    imbalance_cfg = params["imbalance"]
-    eval_cfg = params["evaluation"]
-    cand_cfg = params["candidate_selection"]
-    search_space = params["search_space"][model_family]
+    search_space = params["search_space"]
+    common_space = search_space.get("common", {})
+    family_space = search_space.get(model_family, {})
+    full_space = {**common_space, **family_space}
 
-    seed = automl_cfg.get("seed", 42)
+    seed = params["automl"].get("seed", 42)
     random.seed(seed)
     np.random.seed(seed)
     tf.random.set_seed(seed)
 
-    input_dataset_path = (
+    dataset_path = (
         project_root
         / "executions"
         / "04_targetengineering"
-        / parent_variant_f04
+        / parent_variant
         / "04_targetengineering_dataset.parquet"
     )
 
-    df = pd.read_parquet(input_dataset_path)
-    X, y, aux = vectorize_fn(df, params)
+    print(">> Antes de leer parquet")
+    df = pd.read_parquet(dataset_path)
+    print(">> Parquet leído")
+
+    imbalance_cfg = params.get("imbalance", {})
+    sampler_info = {}
+
+    # 1️⃣ Aplicar rare_events primero (si procede)
+    df, sampler_info = apply_rare_events(df, imbalance_cfg, seed)
+
+    print("\n===== SAMPLING DEBUG =====")
+    print("strategy:", imbalance_cfg.get("strategy"))
+    print("total rows:", len(df))
+    print("positives:", (df["label"]==1).sum())
+    print("negatives:", (df["label"]==0).sum())
+    print("==========================\n")
+
+
+
+    # 2️⃣ Aplicar max_samples solo si NO estamos en rare_events
+    max_samples = params["training"].get("max_samples")
+    if imbalance_cfg.get("strategy") != "rare_events":
+        if max_samples is not None and len(df) > max_samples:
+            df = df.sample(n=max_samples, random_state=seed)
+
+    print("After rare_events:")
+    print("  rows:", len(df))
+    print("  positives:", (df["label"]==1).sum())
+    print("  negatives:", (df["label"]==0).sum())
+
+    X, y, aux = vectorize_fn(df)
+
 
     idx = np.arange(len(X))
     np.random.shuffle(idx)
 
+    split = params["evaluation"]["split"]
     n = len(idx)
-    n_train = int(eval_cfg["split"]["train"] * n)
-    n_val = int(eval_cfg["split"]["val"] * n)
+    n_train = int(split["train"] * n)
+    n_val = int(split["val"] * n)
 
     train_idx = idx[:n_train]
     val_idx = idx[n_train:n_train + n_val]
@@ -281,45 +329,33 @@ def main(variant: str):
     X_val, y_val = X[val_idx], y[val_idx]
     X_test, y_test = X[test_idx], y[test_idx]
 
-    max_samples = training_cfg.get("max_samples")
-    if max_samples is not None and len(X_train) > max_samples:
-        sel = np.random.choice(len(X_train), size=max_samples, replace=False)
-        X_train = X_train[sel]
-        y_train = y_train[sel]
-
-    pd.DataFrame(X_train).to_parquet(variant_root / "train.parquet")
-    pd.DataFrame(X_val).to_parquet(variant_root / "val.parquet")
-    pd.DataFrame(X_test).to_parquet(variant_root / "test.parquet")
+    pd.DataFrame({
+        "train_idx": train_idx,
+        "val_idx": np.pad(val_idx, (0, len(train_idx)-len(val_idx)), constant_values=-1),
+        "test_idx": np.pad(test_idx, (0, len(train_idx)-len(test_idx)), constant_values=-1)
+    }).to_parquet(variant_root / "splits.parquet")
 
     class_weights = (
         compute_class_weights(y_train)
-        if imbalance_cfg["strategy"] == "auto"
+        if params["imbalance"]["strategy"] == "auto"
         else None
     )
-
-    issues = check_split_feasibility(y_train, y_val)
-    if issues:
-        pm.save_metadata(
-            {"phase": PHASE, "variant": variant, "status": "skipped", "reason": issues}
-        )
-        return
 
     experiments_dir = variant_root / "experiments"
     experiments_dir.mkdir(exist_ok=True)
 
-    runs = []
+    best_model = None
+    best_recall = -1
+    best_hp = None
+    trials_summary = []
 
-    steps_per_epoch = min(
-        max(1, len(X_train) // training_cfg["batch_size"]), 2000
-    )
+    for trial in range(params["automl"]["max_trials"]):
 
-    # ---------------- AutoML ----------------
-    for trial in range(automl_cfg["max_trials"]):
-        hp = {k: random.choice(v) for k, v in search_space.items()}
+        hp = {k: random.choice(v) for k, v in full_space.items()}
 
         model = build_model_fn(aux, hp)
         model.compile(
-            optimizer=keras.optimizers.Adam(hp["learning_rate"]),
+            optimizer=legacy_optimizers.Adam(hp["learning_rate"]),
             loss="binary_crossentropy",
             metrics=[keras.metrics.Recall(name="recall")],
         )
@@ -328,174 +364,110 @@ def main(variant: str):
             X_train,
             y_train,
             validation_data=(X_val, y_val),
-            epochs=training_cfg["epochs"],
+            epochs=params["training"]["epochs"],
             batch_size=hp["batch_size"],
             class_weight=class_weights,
             verbose=1,
-            steps_per_epoch=steps_per_epoch,
         )
 
-        val_recall = max(hist.history["val_recall"])
+        val_recall = float(max(hist.history["val_recall"]))
 
-        exp_id = f"exp_{trial:03d}"
-        exp_dir = experiments_dir / exp_id
+        exp_dir = experiments_dir / f"exp_{trial:03d}"
         exp_dir.mkdir(exist_ok=True)
-
         model.save(exp_dir / "model.h5")
+
         with open(exp_dir / "metrics.json", "w") as f:
             json.dump({"val_recall": val_recall}, f, indent=2)
 
-        runs.append({"exp_id": exp_id, "val_recall": val_recall, "hp": hp})
+        trials_summary.append({
+            "trial_id": trial,
+            "hyperparameters": hp,
+            "val_recall": val_recall
+        })
 
-    # ---------------- Candidates ----------------
-    threshold = cand_cfg["threshold"]
-    selected = [r for r in runs if r["val_recall"] >= threshold]
-    if not selected:
-        selected = [max(runs, key=lambda r: r["val_recall"])]
+        if val_recall > best_recall:
+            best_recall = val_recall
+            best_model = model
+            best_hp = hp
 
-    candidates_dir = variant_root / "candidates"
-    candidates_dir.mkdir(exist_ok=True)
+    final_model_path = variant_root / "model_final.h5"
+    best_model.save(final_model_path)
 
-    candidates = []
-    fig_dir = variant_root / "figures"
-    fig_dir.mkdir(exist_ok=True)
+    from sklearn.metrics import confusion_matrix, precision_score, f1_score, recall_score
 
-    for i, r in enumerate(sorted(selected, key=lambda x: -x["val_recall"]), 1):
-        cand_id = f"cand_{i:02d}"
-        cand_dir = candidates_dir / cand_id
-        cand_dir.mkdir(exist_ok=True)
+    # Predicción en TEST
+    y_pred_prob = best_model.predict(X_test, verbose=0)
+    y_pred = (y_pred_prob >= 0.5).astype(int).ravel()
 
-        src = experiments_dir / r["exp_id"]
-        model = keras.models.load_model(src / "model.h5")
-        model.save(cand_dir / "model.h5")
+    cm = confusion_matrix(y_test, y_pred).tolist()
+    precision = float(precision_score(y_test, y_pred, zero_division=0))
+    recall = float(recall_score(y_test, y_pred, zero_division=0))
+    f1 = float(f1_score(y_test, y_pred, zero_division=0))
 
-        y_score = model.predict(X_test).ravel()
-        precision, recall, thresholds = precision_recall_curve(y_test, y_score)
+    print("\n=== TEST METRICS (best model) ===")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"F1:        {f1:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
 
-        y_pred = (y_score >= 0.5).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+    trace_metadata_path = variant_root / f"{PHASE}_metadata.json"
+    functional_metadata_path = variant_root / "model_summary.json"
 
-        with open(cand_dir / "metrics.json", "w") as f:
-            json.dump(
-                {
-                    "val_recall": r["val_recall"],
-                    "tp": int(tp),
-                    "tn": int(tn),
-                    "fp": int(fp),
-                    "fn": int(fn),
-                },
-                f,
-                indent=2,
-            )
-
-        save_figure(
-            fig_dir / f"{cand_id}_precision_recall.png",
-            lambda: (
-                plt.plot(recall, precision),
-                plt.xlabel("Recall"),
-                plt.ylabel("Precision"),
-                plt.title(f"{cand_id} — Precision–Recall"),
-            ),
-        )
-
-        save_figure(
-            fig_dir / f"{cand_id}_recall_vs_threshold.png",
-            lambda: (
-                plt.plot(thresholds, recall[:-1]),
-                plt.xlabel("Threshold"),
-                plt.ylabel("Recall"),
-                plt.title(f"{cand_id} — Recall vs Threshold"),
-            ),
-        )
-
-        candidates.append(
-            {
-                "candidate_id": cand_id,
-                "from_experiment": r["exp_id"],
-                "val_recall": r["val_recall"],
-                "confusion_matrix": {
-                    "tp": int(tp),
-                    "tn": int(tn),
-                    "fp": int(fp),
-                    "fn": int(fn),
-                },
-            }
-        )
-
-    # ---------------- BEST MODEL ----------------
-    best = sorted(
-        candidates,
-        key=lambda c: (
-            -c["val_recall"],
-            c["confusion_matrix"]["fn"],
-            c["confusion_matrix"]["fp"],
-        ),
-    )[0]
-
-    best_dir = variant_root / "best"
-    best_dir.mkdir(exist_ok=True)
-
-    src_dir = candidates_dir / best["candidate_id"]
-    model = keras.models.load_model(src_dir / "model.h5")
-    model.save(best_dir / "model.h5")
-
-    with open(src_dir / "metrics.json") as f:
-        metrics = json.load(f)
-
-    with open(best_dir / "metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2)
-
-    with open(best_dir / "origin.json", "w") as f:
-        json.dump(
-            {
-                "selected_from": best["candidate_id"],
-                "selection_rule": "max(val_recall), min(fn), min(fp)",
-            },
-            f,
-            indent=2,
-        )
-
-    # ---------------- METADATA ----------------
     metadata = {
         "phase": PHASE,
         "variant": variant,
-        "parent_variant": parent_variant_f04,
+        "parent_variant": parent_variant,
         "model_family": model_family,
-        "num_experiments": len(runs),
-        "num_candidates": len(candidates),
-        "best_model": {
-            "candidate_id": best["candidate_id"],
-            "path": str(best_dir / "model.h5"),
+        "num_experiments": len(trials_summary),
+        "best_val_recall": float(best_recall),
+        "best_hyperparameters": best_hp,
+        "model_path": str(final_model_path),
+        "dataset_path": str(dataset_path),
+        "split_sizes": {
+            "train": int(len(train_idx)),
+            "val": int(len(val_idx)),
+            "test": int(len(test_idx))
         },
-        "selection_policy": cand_cfg,
-        "git": {"commit": get_git_hash()},
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "imbalance_policy": {
+            "config": imbalance_cfg,
+            "sampler_info": sampler_info
+        },
+        "test_metrics": {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "confusion_matrix": cm
+        },
+        "trials_summary": trials_summary,
+        "mlflow": {
+            "run_id": None,
+            "published": False
+        },
+        "git": {
+            "commit": get_git_hash()
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
-    metadata_path = variant_root / f"{PHASE}_metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
+    with open(functional_metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
     write_metadata(
         stage=PHASE,
         variant=variant,
-        parent_variant=parent_variant_f04,
-        inputs=[str(input_dataset_path)],
-        outputs=[str(metadata_path)],
+        parent_variant=parent_variant,
+        inputs=[str(dataset_path)],
+        outputs=[str(functional_metadata_path)],
         params=params,
-        metadata_path=metadata_path,
+        metadata_path=trace_metadata_path,
     )
 
-    elapsed = perf_counter() - t_start
-    print(f"[DONE] Fase 05 completada en {elapsed:.1f}s")
+    print(f"[DONE] Fase 05 completada en {perf_counter()-t_start:.1f}s")
 
-
-# ============================================================
-# CLI
-# ============================================================
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fase 05 — Modeling")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--variant", required=True)
     args = parser.parse_args()
     main(args.variant)

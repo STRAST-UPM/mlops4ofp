@@ -1,7 +1,4 @@
 variants:
   v001:
-    created_at: '2026-02-12T10:23:58.727087+00:00'
-    params_path: C:\Users\inesv\Desktop\mlops4ofp\executions\01_explore\v001\params.yaml
-  v002:
-    created_at: '2026-02-12T10:25:13.054130+00:00'
-    params_path: C:\Users\inesv\Desktop\mlops4ofp\executions\01_explore\v002\params.yaml
+    created_at: '2026-02-11T15:41:21.922760+00:00'
+    params_path: /Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v001/params.yaml

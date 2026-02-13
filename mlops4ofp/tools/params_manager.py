@@ -366,6 +366,46 @@ class ParamsManager:
 
     def _parse_extra_params(self, extra_params_list):
         """
+        Soporta:
+        --set a=1
+        --set imbalance.strategy=rare_events
+        --set imbalance.max_majority_samples=20000
+        """
+        result = {}
+
+        if not extra_params_list:
+            return result
+
+        for item in extra_params_list:
+            if "=" not in item:
+                raise ValueError(f"Formato inválido --set {item}")
+
+            key, raw_value = item.split("=", 1)
+            raw_value = raw_value.strip()
+
+            try:
+                value = yaml.safe_load(raw_value)
+            except Exception:
+                value = raw_value
+
+            # Soporte claves anidadas
+            if "." in key:
+                parts = key.split(".")
+                d = result
+                for p in parts[:-1]:
+                    if p not in d or not isinstance(d[p], dict):
+                        d[p] = {}
+                    d = d[p]
+                d[parts[-1]] = value
+            else:
+                result[key] = value
+
+        return result
+
+
+
+    def _parse_extra_params2(self, extra_params_list):
+        """
         Convierte:
            ["cleaning_strategy=basic", 
             "nan_values=[-999, -1]",
@@ -454,7 +494,8 @@ class ParamsManager:
         # ---------------------------------------------------------
         # Validar parámetros antes de crear la variante
         # ---------------------------------------------------------
-        validate_params(self.phase, base_params, PROJECT_ROOT)
+        validate_params(self.phase, base_params, self.phase_dir.parents[1])
+        #PROJECT_ROOT)
 
         # ---------------------------------------------------------
         # Guardar params.yaml de la variante

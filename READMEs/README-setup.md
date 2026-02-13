@@ -20,18 +20,15 @@ El proceso de setup se ejecuta una sola vez por copia del repositorio.
 Este proyecto requiere una version concreta de Python.
 El setup no funciona con versiones no soportadas.
 
-Versiones soportadas:
-- Python 3.10
-- Python 3.11
+Version soportada:
+- Python 3.11.x (exactamente 3.11)
 
 Versiones NO soportadas:
 - Python 3.12 o superior
-- Python 3.9 o inferior
+- Python 3.10 o inferior
 
-Motivo:
-El pipeline usa TensorFlow y librerias cientificas no estables en Python >= 3.12.
-
-El script setup/setup.py valida la version de Python y aborta si no es compatible.
+Este proyecto requiere exactamente Python 3.11.
+El setup aborta si se ejecuta con cualquier otra version.
 
 ### Comprobar tu version
 python --version
@@ -64,7 +61,7 @@ Windows:
 
 Obligatorias:
 - git
-- python (3.10 o 3.11)
+- python 3.11
 - make
 - dvc
 
@@ -152,7 +149,13 @@ Si existe .mlops4ofp/env.sh, el Makefile lo incluye automaticamente.
 make check-setup
 make clean-setup
 
-clean-setup elimina solo .mlops4ofp (no borra .venv ni datos).
+Elimina completamente:
+- .venv
+- .mlops4ofp
+- configuracion DVC local
+- storage local
+
+El proyecto vuelve exactamente al estado post-clone.
 
 ---
 

@@ -1,0 +1,5 @@
+outs:
+- md5: e0f163ddfb263797ff1d94226b01b8f4
+  size: 231
+  hash: md5
+  path: 02_prepareeventsds_params.json

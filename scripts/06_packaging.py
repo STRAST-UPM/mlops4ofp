@@ -3,10 +3,10 @@
 Fase 06 — PACKAGING / System Composition
 
 Construye un paquete de sistema autocontenido que incluye:
-- selección explícita de modelos (desde F05)
-- objetivos formales (desde F04_targetengineering)
-- catálogo de eventos (desde F02_prepareeventsds)
-- replay de eventos reproducible
+
+- modelo oficial de cada variante F05
+- dataset etiquetado de cada F04 asociado
+- objetivos formales
 - metadata y trazabilidad completas
 
 NO ejecuta inferencia.
@@ -23,8 +23,6 @@ from time import perf_counter
 import shutil
 
 import yaml
-import pandas as pd
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 # =====================================================================
@@ -84,12 +82,10 @@ def main(variant: str):
         params = yaml.safe_load(f)
 
     parent_variants_f05 = params["parent_variants_f05"]
-    temporal = params["temporal"]
-    models_cfg = params["models"]
-    replay_cfg = params["replay"]
+    temporal = params.get("temporal", {})
 
-    if not isinstance(models_cfg, list) or not models_cfg:
-        raise ValueError("models debe ser una lista no vacía")
+    if not parent_variants_f05:
+        raise ValueError("parent_variants_f05 no puede estar vacío")
 
     # --------------------------------------------------
     # Contexto
@@ -107,44 +103,56 @@ def main(variant: str):
     print(json.dumps(params, indent=2))
 
     # --------------------------------------------------
-    # Resolver linaje completo
+    # Resolver linaje
     # --------------------------------------------------
     lineage = {
         "f05": set(parent_variants_f05),
         "f04": set(),
         "f03": set(),
-        "f02": set(),
     }
 
     f05_to_f04 = {}
     f04_to_f03 = {}
-    f03_to_f02 = {}
 
+    # F05 → F04
     for v05 in parent_variants_f05:
         p = project_root / "executions" / "05_modeling" / v05 / "params.yaml"
+        if not p.exists():
+            raise FileNotFoundError(f"No existe F05: {v05}")
+
         f05_params = yaml.safe_load(p.read_text())
         v04 = f05_params["parent_variant"]
+
         lineage["f04"].add(v04)
         f05_to_f04[v05] = v04
 
+    # F04 → F03
     for v04 in lineage["f04"]:
         p = project_root / "executions" / "04_targetengineering" / v04 / "params.yaml"
         f04_params = yaml.safe_load(p.read_text())
         v03 = f04_params["parent_variant"]
+
         lineage["f03"].add(v03)
         f04_to_f03[v04] = v03
+
+    # Validación fuerte: mismo régimen temporal
+    regimes = set()
 
     for v03 in lineage["f03"]:
         p = project_root / "executions" / "03_preparewindowsds" / v03 / "params.yaml"
         f03_params = yaml.safe_load(p.read_text())
-        v02 = f03_params["parent_variant"]
-        lineage["f02"].add(v02)
-        f03_to_f02[v03] = v02
 
-    if len(lineage["f02"]) != 1:
-        raise RuntimeError(f"F06 requiere un único F02 común: {lineage['f02']}")
+        regime = (
+            f03_params["temporal"]["Tu"],
+            f03_params["temporal"]["OW"],
+            f03_params["temporal"]["PW"],
+        )
+        regimes.add(regime)
 
-    parent_f02 = list(lineage["f02"])[0]
+    if len(regimes) != 1:
+        raise RuntimeError(
+            f"Las variantes F05 no comparten el mismo régimen temporal: {regimes}"
+        )
 
     print("[INFO] Linaje resuelto:")
     print(json.dumps({k: sorted(v) for k, v in lineage.items()}, indent=2))
@@ -157,123 +165,108 @@ def main(variant: str):
     for v04 in lineage["f04"]:
         p = project_root / "executions" / "04_targetengineering" / v04 / "params.yaml"
         f04_params = yaml.safe_load(p.read_text())
+
         objectives[v04] = {
             "expression": f04_params.get("target_expression"),
-            "params": f04_params,
         }
 
     objectives_path = variant_root / "objectives.json"
     objectives_path.write_text(json.dumps(objectives, indent=2), encoding="utf-8")
-    print(f"[OK] Objetivos materializados: {objectives_path}")
+    print(f"[OK] Objetivos materializados")
 
     # --------------------------------------------------
-    # Materializar catálogo de eventos (F02)
+    # Copiar datasets F04 (in/out ya preparados)
     # --------------------------------------------------
-    p = project_root / "executions" / "02_prepareeventsds" / parent_f02 / "params.yaml"
-    f02_params = yaml.safe_load(p.read_text())
+    datasets_dir = variant_root / "datasets"
+    datasets_dir.mkdir(exist_ok=True)
 
-    events_catalog = f02_params.get("event_catalog")
-    if not events_catalog:
-        raise RuntimeError("No se encontró event_catalog en F02")
+    dataset_paths = []
 
-    events_path = variant_root / "events_catalog.json"
-    events_path.write_text(json.dumps(events_catalog, indent=2), encoding="utf-8")
-    print(f"[OK] Catálogo de eventos materializado: {events_path}")
+    for v04 in lineage["f04"]:
+        src = (
+            project_root
+            / "executions"
+            / "04_targetengineering"
+            / v04
+            / "04_targetengineering_dataset.parquet"
+        )
+
+        if not src.exists():
+            raise FileNotFoundError(f"No existe dataset F04: {src}")
+
+        dst = datasets_dir / f"{v04}__dataset.parquet"
+        shutil.copyfile(src, dst)
+
+        dataset_paths.append(str(dst))
+
+    print(f"[OK] {len(dataset_paths)} datasets F04 copiados")
 
     # --------------------------------------------------
-    # Validar y copiar modelos
+    # Copiar modelos oficiales de cada F05
     # --------------------------------------------------
     models_dir = variant_root / "models"
     models_dir.mkdir(exist_ok=True)
 
     selected_models = []
 
-    for m in models_cfg:
-        f04_id = m["f04_id"]
-        model_id = m["model_id"]
-        source_f05 = m["source_f05"]
+    for v05 in parent_variants_f05:
 
-        if source_f05 not in parent_variants_f05:
-            raise ValueError(f"Modelo {model_id} usa F05 no declarado: {source_f05}")
+        # Se asume: cada F05 deja exactamente un modelo oficial en models/
+        model_root = project_root / "executions" / "05_modeling" / v05 / "models"
 
-        src = (
-            project_root
-            / "executions"
-            / "05_modeling"
-            / source_f05
-            / "models"
-            / model_id
-        )
+        model_dirs = [d for d in model_root.iterdir() if d.is_dir()]
 
-        if not src.exists():
-            raise FileNotFoundError(f"No existe modelo: {src}")
+        if len(model_dirs) == 0:
+            raise RuntimeError(f"F05 {v05} no contiene modelo oficial")
 
-        dst = models_dir / f"{f04_id}__{model_id}"
+        if len(model_dirs) > 1:
+            raise RuntimeError(
+                f"F05 {v05} contiene múltiples modelos; F06 espera exactamente uno"
+            )
+
+        src = model_dirs[0]
+        dst = models_dir / f"{v05}__{src.name}"
+
         if dst.exists():
             shutil.rmtree(dst)
 
         shutil.copytree(src, dst)
 
         selected_models.append({
-            "f04_id": f04_id,
-            "model_id": model_id,
-            "source_f05": source_f05,
+            "source_f05": v05,
+            "model_id": src.name,
         })
 
     print(f"[OK] {len(selected_models)} modelos copiados")
 
     # --------------------------------------------------
-    # Materializar replay
-    # --------------------------------------------------
-    replay_dir = variant_root / "replay"
-    replay_dir.mkdir(exist_ok=True)
-
-    replay_input = (
-        project_root
-        / "executions"
-        / "02_prepareeventsds"
-        / parent_f02
-        / "02_prepareeventsds_dataset.parquet"
-    )
-
-    table = pq.read_table(replay_input)
-    pq.write_table(table, replay_dir / "replay_events.parquet")
-
-    print(f"[OK] Replay materializado")
-
-    # --------------------------------------------------
-    # Metadata propia de F06
+    # Metadata F06
     # --------------------------------------------------
     metadata = {
         "phase": PHASE,
         "variant": variant,
         "git_commit": get_git_hash(),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "temporal": temporal,
+        "temporal": regimes.pop(),
         "lineage": {k: sorted(v) for k, v in lineage.items()},
         "models": selected_models,
         "objectives": list(objectives.keys()),
-        "events_catalog": list(events_catalog.keys()),
+        "datasets": dataset_paths,
     }
 
     metadata_path = variant_root / f"{PHASE}_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     # --------------------------------------------------
-    # Trazabilidad global
+    # Trazabilidad
     # --------------------------------------------------
     write_metadata(
         stage=PHASE,
         variant=variant,
         parent_variant=None,
         parent_variants=parent_variants_f05,
-        inputs=[str(replay_input)],
-        outputs=[
-            str(models_dir),
-            str(replay_dir),
-            str(objectives_path),
-            str(events_path),
-        ],
+        inputs=dataset_paths,
+        outputs=[str(models_dir), str(datasets_dir), str(objectives_path)],
         params=params,
         metadata_path=metadata_path,
     )

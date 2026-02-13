@@ -1,0 +1,102 @@
+queries:
+  # ==========================================
+  # 1. COINCIDENCIAS EXACTAS (Atomic & Sequence)
+  # ==========================================
+  
+  # Valor único exacto en observación
+  - src: "475"
+    dst: null
+
+  # Secuencia exacta en observación
+  - src: "475,511"
+    dst: null
+
+  # Secuencia exacta larga (Tu caso real)
+  - src: "377,372,377,372"
+    dst: "475,511"
+
+  # ==========================================
+  # 2. COMODINES Y PATRONES (Wildcards)
+  # ==========================================
+
+  # Starts with: Empieza por 475 y sigue cualquier cosa
+  - src: "475,*"
+    dst: null
+
+  # Ends with: Termina en 511 (cualquier cosa antes)
+  - src: "*,511"
+    dst: null
+
+  # Anyone (?): 475, luego UNO cualquiera, luego 511
+  - src: "475,?,511"
+    dst: null
+
+  # All (*): Seleccionar todo (Cuidado si el dataset es enorme)
+  # - src: "*"
+  #   dst: "*"
+
+  # ==========================================
+  # 3. PERTENENCIA DE CONJUNTOS (Has / Contains)
+  # ==========================================
+
+  # Contiene el evento 511 en cualquier posición
+  - src: "{511}"
+    dst: null
+
+  # NO contiene el evento 511 (Negación de conjunto)
+  - src: "!{511}"
+    dst: null
+
+  # ==========================================
+  # 4. LÓGICA BOOLEANA (AND, OR)
+  # ==========================================
+
+  # OR: Empieza por 475 O empieza por 612
+  - src: "475 | 612"
+    dst: null
+
+  # AND complejo: Empieza por 475 Y contiene el 612
+  - src: "475,* & {612}"
+    dst: null
+
+  # AND con Negación: Empieza por 475 Y NO contiene el 511
+  - src: "475,* & !{511}"
+    dst: null
+
+  # ==========================================
+  # 5. ALIAS (Componentes definidos en config)
+  # ==========================================
+  # Nota: Esto solo funcionará si en components.yml tienes definidos
+  # 'Outlet_Temperature' o 'MG-LV-MSB_Frequency'
+
+  # Alias simple
+  - src: "@Outlet_Temperature"
+    dst: null
+
+  # Alias combinado con OR
+  - src: "@Outlet_Temperature | @MG-LV-MSB_Frequency"
+    dst: null
+
+  # ==========================================
+  # 6. INTERACCIÓN SRC (Observación) y DST (Predicción)
+  # ==========================================
+
+  # Patrón en SRC y Patrón en DST
+  - src: "475,*"      # Obs empieza por 475
+    dst: "{511}"      # Predicción contiene 511
+
+  # Solo DST (SRC cualquiera por defecto o null)
+  - src: null
+    dst: "*,612"      # Predicción termina en 612
+
+  # ==========================================
+  # 7. CASOS DE BORDE (Edge Cases)
+  # ==========================================
+
+  # Sin resultados (IDs inventados para asegurar retorno vacío)
+  - src: "999999,999999"
+    dst: null
+
+  # # Formato conflictivo (Espacios extra que el parser debe limpiar)
+  - src: " 475 ,  511 "
+    dst: null

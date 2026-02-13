@@ -1,283 +1,269 @@
 #!/usr/bin/env python3
-import sys
+
 import subprocess
+import sys
+import shutil
 from pathlib import Path
 import argparse
-
-# --------------------------------------------------
-# Requisitos de versión de Python
-# --------------------------------------------------
-
-MIN_PYTHON = (3, 10)
-MAX_PYTHON = (3, 11)  # inclusivo
-
-def check_python_version():
-    v = sys.version_info
-    if v < MIN_PYTHON or v > MAX_PYTHON:
-        abort(
-            f"Versión de Python no soportada: {v.major}.{v.minor}.{v.micro}\n"
-            f"Se requiere Python >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]} "
-            f"y <= {MAX_PYTHON[0]}.{MAX_PYTHON[1]}.\n\n"
-            "Soluciones:\n"
-            "  - macOS (Homebrew): brew install python@3.11\n"
-            "  - Ubuntu/Debian:   sudo apt install python3.11\n"
-            "  - Windows:         instalar Python 3.11 desde python.org\n"
-        )
-
-
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv"
-VENV_PYTHON = VENV / "bin" / "python"
 CONFIG_DIR = ROOT / ".mlops4ofp"
 CONFIG_FILE = CONFIG_DIR / "setup.yaml"
 
 
-# --------------------------------------------------
-# Utilidades
-# --------------------------------------------------
-
-def run(cmd, cwd=ROOT, check=True):
-    print("[CMD]", " ".join(cmd))
-    subprocess.run(cmd, cwd=cwd, check=check)
-
+# ============================================================
+# UTILIDADES
+# ============================================================
 
 def abort(msg):
     print(f"\n[ERROR] {msg}")
     sys.exit(1)
 
 
-# --------------------------------------------------
-# Bootstrap Python
-# --------------------------------------------------
+def run(cmd, cwd=ROOT):
+    print("[CMD]", " ".join(cmd))
+    subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def find_python_311():
+    candidates = [
+        "python3.11",
+        "/usr/local/bin/python3.11",
+        "/opt/homebrew/bin/python3.11",
+    ]
+    for c in candidates:
+        path = shutil.which(c)
+        if path:
+            return path
+    return None
+
+
+# ============================================================
+# VENV
+# ============================================================
 
 def ensure_venv():
+
     if VENV.exists():
-        print("[INFO] .venv ya existe")
         return
 
-    print("[INFO] Creando entorno virtual .venv")
-    run([sys.executable, "-m", "venv", ".venv"])
+    python311 = find_python_311()
+    if not python311:
+        abort(
+            "No se encontró python3.11.\n"
+            "Instálalo antes de continuar."
+        )
+
+    print(f"[INFO] Usando Python 3.11: {python311}")
+    run([python311, "-m", "venv", str(VENV)])
+
+    pip = VENV / "bin" / "pip"
+    python = VENV / "bin" / "python"
+
+    run([str(pip), "install", "--upgrade", "pip"])
 
     req = ROOT / "requirements.txt"
     if not req.exists():
         abort("requirements.txt no encontrado")
 
-    pip = VENV / "bin" / "pip"
-    print("[INFO] Instalando dependencias")
     run([str(pip), "install", "-r", str(req)])
 
+    print("[INFO] Verificando TensorFlow...")
+    subprocess.run(
+        [str(python), "-c", "import tensorflow as tf; print(tf.__version__)"],
+        check=True,
+    )
 
-def ensure_running_in_venv(argv):
-    if sys.executable == str(VENV_PYTHON):
+    print("[OK] Entorno virtual creado correctamente")
+
+
+def ensure_running_in_venv(config_path):
+
+    venv_python = VENV / "bin" / "python"
+
+    if Path(sys.executable).resolve() != venv_python.resolve():
+        print("[INFO] Reejecutando dentro de .venv")
+        subprocess.run(
+            [str(venv_python), __file__, "--config", config_path],
+            check=True,
+        )
+        sys.exit(0)
+
+
+# ============================================================
+# GIT
+# ============================================================
+
+def setup_git(cfg):
+
+    git_cfg = cfg.get("git", {})
+    mode = git_cfg.get("mode", "none")
+    remote_url = git_cfg.get("remote_url")
+
+    # Si no existe repo → crear
+    if not (ROOT / ".git").exists():
+        print("[INFO] Inicializando repositorio Git")
+        run(["git", "init"])
+
+    if mode == "none":
         return
 
-    print("[INFO] Reejecutando setup dentro de .venv")
-    run([str(VENV_PYTHON), __file__] + argv)
-    sys.exit(0)
+    if mode == "custom":
 
+        if not remote_url:
+            abort("git.remote_url obligatorio en modo custom")
 
-# --------------------------------------------------
-# Validación estructural del setup
-# --------------------------------------------------
-
-def validate_cfg(cfg):
-    # ---------- DVC ----------
-    dvc = cfg.get("dvc", {})
-    backend = dvc.get("backend")
-
-    if backend not in ("local", "dagshub"):
-        abort(f"Backend DVC no soportado: {backend}")
-
-    if backend == "local":
-        if not dvc.get("path"):
-            abort("dvc.path obligatorio cuando backend=local")
-
-    if backend == "dagshub":
-        if not dvc.get("repo"):
-            abort("dvc.repo obligatorio cuando backend=dagshub (formato org/repo)")
-
-    # ---------- MLflow ----------
-    ml = cfg.get("mlflow", {})
-    if ml.get("enabled", False):
-        uri = ml.get("tracking_uri")
-        if not uri:
-            abort("MLflow habilitado pero falta mlflow.tracking_uri")
-
-        backend_ml = ml.get("backend", "local")
-        if backend_ml == "dagshub" and "dagshub.com" not in uri:
-            abort("MLflow backend dagshub requiere tracking_uri en dagshub.com")
-
-    # ---------- Git ----------
-    git = cfg.get("git", {})
-    if git.get("mode") == "custom" and not git.get("remote_url"):
-        abort("git.remote_url obligatorio cuando git.mode=custom")
-
-
-# --------------------------------------------------
-# env.sh (MLflow)
-# --------------------------------------------------
-
-def create_env_sh(cfg):
-    ml = cfg.get("mlflow", {})
-    if not ml.get("enabled", False):
-        return
-
-    env_file = CONFIG_DIR / "env.sh"
-    content = [
-        "#!/usr/bin/env sh",
-        "# Generado por setup.py — NO editar",
-        "",
-        f"export MLFLOW_TRACKING_URI={ml['tracking_uri']}",
-        "",
-    ]
-    env_file.write_text("\n".join(content))
-    env_file.chmod(0o755)
-    print("[INFO] Creado .mlops4ofp/env.sh")
-
-
-# --------------------------------------------------
-# DVC
-# --------------------------------------------------
-
-import os
-
-def setup_dvc_remote_dagshub(cfg):
-    dvc_cfg = cfg.get("dvc", {})
-    repo = dvc_cfg.get("repo")
-    if not repo:
-        abort("dvc.repo no definido para backend dagshub")
-
-    user = os.environ.get("DAGSHUB_USER")
-    token = os.environ.get("DAGSHUB_TOKEN")
-
-    if not user or not token:
-        abort(
-            "Backend DAGsHub seleccionado pero faltan credenciales.\n"
-            "Define las variables de entorno:\n"
-            "  export DAGSHUB_USER=...\n"
-            "  export DAGSHUB_TOKEN=..."
+        existing = subprocess.run(
+            ["git", "remote", "get-url", "publish"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
         )
 
-    remote_url = f"https://dagshub.com/{repo}.dvc"
-
-    print(f"[INFO] Configurando DVC DAGsHub: {remote_url}")
-
-    # Añadir o actualizar remoto
-    run(["dvc", "remote", "add", "-d", "storage", remote_url], check=False)
-    run(["dvc", "remote", "modify", "storage", "url", remote_url])
-
-    # Autenticación obligatoria
-    run(["dvc", "remote", "modify", "storage", "auth", "basic"])
-    run(["dvc", "remote", "modify", "storage", "user", user])
-    run(["dvc", "remote", "modify", "storage", "password", token])
-
-    print("[OK] DVC DAGsHub configurado con autenticación")
+        if existing.returncode == 0:
+            print("[INFO] Actualizando remote 'publish'")
+            run(["git", "remote", "set-url", "publish", remote_url])
+        else:
+            print("[INFO] Añadiendo remote 'publish'")
+            run(["git", "remote", "add", "publish", remote_url])
 
 
+# ============================================================
+# DVC
+# ============================================================
 
-def setup_dvc_remote(cfg):
-    dvc = cfg["dvc"]
-    backend = dvc["backend"]
+def add_or_update_dvc_remote(venv_python, name, url):
 
-    if backend == "local":
-        path = Path(dvc["path"])
-        path.mkdir(parents=True, exist_ok=True)
-        run(["dvc", "remote", "add", "-d", "storage", str(path)], check=False)
-        run(["dvc", "remote", "modify", "storage", "url", str(path)], check=False)
-        print(f"[INFO] DVC local configurado: {path}")
-        return
-
-    elif backend == "dagshub":
-        setup_dvc_remote_dagshub(cfg)
-
-
-# --------------------------------------------------
-# Git (remote publish)
-# --------------------------------------------------
-
-def setup_git_remote(cfg):
-    git = cfg.get("git", {})
-    url = git.get("remote_url")
-    if not url:
-        return
-
-    if not (ROOT / ".git").exists():
-        print("[WARN] No es un repo Git, no se configura remote 'publish'")
-        return
-
-    res = subprocess.run(
-        ["git", "remote", "get-url", "publish"],
+    result = subprocess.run(
+        [str(venv_python), "-m", "dvc", "remote", "add", "-d", name, url],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
 
-    if res.returncode == 0:
-        run(["git", "remote", "set-url", "publish", url])
-        print("[INFO] Actualizado remote 'publish'")
+    if result.returncode != 0:
+        print("[INFO] Remote DVC ya existe → actualizando URL")
+        run([
+            str(venv_python), "-m", "dvc",
+            "remote", "modify", name, "url", url
+        ])
+
+
+def setup_dvc(cfg):
+
+    venv_python = VENV / "bin" / "python"
+
+    if not (ROOT / ".dvc").exists():
+        print("[INFO] Inicializando DVC")
+        run([str(venv_python), "-m", "dvc", "init"])
+
+    dvc_cfg = cfg.get("dvc", {})
+    backend = dvc_cfg.get("backend")
+
+    if backend == "local":
+
+        path = ROOT / dvc_cfg.get("path", ".dvc_storage")
+        path.mkdir(parents=True, exist_ok=True)
+
+        add_or_update_dvc_remote(venv_python, "storage", str(path))
+
+    elif backend == "dagshub":
+
+        repo = dvc_cfg.get("repo")
+        if not repo:
+            abort("dvc.repo obligatorio para backend dagshub")
+
+        user = os.environ.get("DAGSHUB_USER")
+        token = os.environ.get("DAGSHUB_TOKEN")
+
+        if not user or not token:
+            abort(
+                "Faltan variables de entorno:\n"
+                "export DAGSHUB_USER=...\n"
+                "export DAGSHUB_TOKEN=..."
+            )
+
+        remote_url = f"https://dagshub.com/{repo}.dvc"
+
+        add_or_update_dvc_remote(venv_python, "storage", remote_url)
+
+        run([str(venv_python), "-m", "dvc", "remote", "modify", "storage", "auth", "basic"])
+        run([str(venv_python), "-m", "dvc", "remote", "modify", "storage", "user", user])
+        run([str(venv_python), "-m", "dvc", "remote", "modify", "storage", "password", token])
+
     else:
-        run(["git", "remote", "add", "publish", url])
-        print("[INFO] Añadido remote 'publish'")
+        abort(f"Backend DVC no soportado: {backend}")
 
 
-# --------------------------------------------------
-# Main
-# --------------------------------------------------
+# ============================================================
+# MLFLOW
+# ============================================================
+
+def setup_mlflow(cfg):
+
+    ml = cfg.get("mlflow", {})
+
+    if not ml.get("enabled", False):
+        return
+
+    tracking_uri = ml.get("tracking_uri")
+    if not tracking_uri:
+        abort("mlflow.tracking_uri obligatorio si enabled=true")
+
+    CONFIG_DIR.mkdir(exist_ok=True)
+
+    env_file = CONFIG_DIR / "env.sh"
+
+    content = [
+        "#!/usr/bin/env sh",
+        "# Generado automáticamente por setup.py",
+        f"export MLFLOW_TRACKING_URI={tracking_uri}",
+    ]
+
+    env_file.write_text("\n".join(content))
+    env_file.chmod(0o755)
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="MLOps4OFP — Setup del proyecto (una sola vez)"
-    )
-    parser.add_argument(
-        "-c", "--config",
-        required=True,
-        help="Fichero YAML de configuración (local.yaml, remote.yaml, etc.)",
-    )
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
     args = parser.parse_args()
 
     print("====================================")
-    print(" MLOps4OFP — Setup del proyecto")
+    print(" MLOps4OFP — Setup definitivo")
     print("====================================")
 
-    check_python_version()
-
-    print(
-        f"[INFO] Python {sys.version_info.major}."
-        f"{sys.version_info.minor} OK"
-    )
-
     ensure_venv()
-    ensure_running_in_venv(sys.argv[1:])
+    ensure_running_in_venv(args.config)
 
     import yaml
 
     if CONFIG_FILE.exists():
-        print("[INFO] El setup ya fue realizado previamente")
-        print("Ejecuta make check-setup")
+        print("[INFO] Setup ya realizado")
         return
 
     cfg_path = Path(args.config)
     if not cfg_path.exists():
-        abort(f"No existe el fichero: {cfg_path}")
+        abort(f"No existe {cfg_path}")
 
     cfg = yaml.safe_load(cfg_path.read_text())
-    if not isinstance(cfg, dict):
-        abort("Fichero de configuración inválido")
 
-    validate_cfg(cfg)
+    setup_git(cfg)
+    setup_dvc(cfg)
+    setup_mlflow(cfg)
 
     CONFIG_DIR.mkdir(exist_ok=True)
     CONFIG_FILE.write_text(yaml.dump(cfg))
 
-    create_env_sh(cfg)
-    setup_dvc_remote(cfg)
-    setup_git_remote(cfg)
-
     print("\n✔ Setup completado correctamente")
-    print("Siguiente paso:")
-    print("  make check-setup")
+    print("Ejecuta ahora: make check-setup")
 
 
 if __name__ == "__main__":

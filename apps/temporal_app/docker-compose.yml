@@ -1,0 +1,31 @@
+services:
+  mds-dashboard:
+    image: stehedor/mds_temporal_app:v0
+    container_name: mds_temporal
+    pull_policy: always
+    ports:
+      - "8050:8050"
+    volumes:
+      - ../../executions:/app/executions
+      - ./epoch_processed:/app/epoch_processed
+    environment:
+      SERVER_PORT: 8050
+      EXECUTIONS_ROOT: "/app/executions"
+      EXPLORE_STAGE: "01_explore"
+      EVENTS_STAGE: "02_prepareeventsds"
+      OUTPUT_CONTROL: "/app/control.yml"
+      DEFAULT_DATASET: "MDS-Complete-v003"
+      TIMESTAMP_COL: "segs"
+      # EPOCH_EVENT_COLS: "event,event_id,evt,code,codigo_evento,event_code,events"
+      EPOCH_EVENT_COLS: '["event","event_id","evt","code","codigo_evento","event_code","events"]'
+      CONTROL_DATASET_FILE: "control_dataset.yml"
+      EPOCH_MODE: "true"
+      EPOCH_PROCESSED_DIR: "/app/epoch_processed"
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: "2.0"
+        reservations:
+          memory: 2G
+    restart: unless-stopped
