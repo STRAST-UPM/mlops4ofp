@@ -57,7 +57,7 @@ from mlops4ofp.tools.artifacts import (
     save_numeric_dataset,
     save_params_and_metadata,
 )
-from mlops4ofp.tools.figures import save_figure
+import mlops4ofp.tools.html_reports.html02 as prepareevents_report02
 
 execution_dir = detect_execution_dir()
 PROJECT_ROOT = detect_project_root(execution_dir)
@@ -124,6 +124,9 @@ print(f"[prepareeventsds] band_thresholds_pct = {band_thresholds_pct}")
 print(f"[prepareeventsds] event_strategy = {event_strategy}")
 print(f"[prepareeventsds] nan_handling = {nan_handling}")
 
+outputs = build_phase_outputs(ctx["variant_root"], PHASE)
+ctx["outputs"] = outputs  # para que generate_figures_and_report use ctx["outputs"]["report"]
+
 # ============================================================
 # 3. Resolver Tu (prioridad: F02 -> F01)
 # ============================================================
@@ -155,10 +158,12 @@ else:
     if Tu_parent is None:
         raise RuntimeError("No se pudo resolver Tu ni en F02 ni en metadata de F01.")
     Tu = float(Tu_parent)
+    params_f02["Tu"] = Tu  # Inyectamos Tu heredado en params_f02 para trazabilidad
     source_Tu = "F01_metadata"
     print(f"[prepareeventsds] Tu heredado de F01: {Tu}")
 
 print(f"[prepareeventsds] Tu final = {Tu} (origen: {source_Tu})")
+ctx["variant_params"] = params_f02
 
 # ============================================================
 # 4. Carga del dataset explorado de la fase padre (F01)
@@ -546,306 +551,13 @@ print("[STATS DEBUG] filas con NaN:",
 # 7. Tablas, figuras e informe HTML (Fase 02)
 # ============================================================
 
-from collections import Counter
-import matplotlib.pyplot as plt
-from mlops4ofp.tools.figures import save_figure
-
-print("[prepareeventsds] Generando tablas, figuras e informe HTML...")
-
-FIGURES_DIR = VARIANT_DIR / "figures"
-FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
-MAX_X_TU = 10
-MAX_BINS = 10
-
-# ------------------------------------------------------------
-# Preparación común
-# ------------------------------------------------------------
-
-flat_events = [ev for evs in df_events["events"] for ev in evs]
-counts = Counter(flat_events)
-inv_event = {v: k for k, v in event_to_id.items()}
-missing = [ev for ev in flat_events if ev not in inv_event]
-print("[DEBUG] event_ids sin nombre en inv_event:", len(missing))
-
-MEASURE_NAMES = sorted(measurement_cols, key=len, reverse=True)
-
-def extract_measure(ev_name: str) -> str:
-    for m in MEASURE_NAMES:
-        if ev_name.startswith(m + "_") or ev_name == m:
-            return m
-    return ev_name.split("_")[0]
-
-# ------------------------------------------------------------
-# Tabla 1 — Recuento por tipo de evento
-# ------------------------------------------------------------
-
-df_event_counts = (
-    pd.DataFrame(
-        [
-            {"event_id": ev_id, "event_name": inv_event[ev_id], "count": cnt}
-            for ev_id, cnt in counts.items()
-        ]
-    )
-    .sort_values("event_id")
-    .reset_index(drop=True)
+prepareevents_report02.generate_figures_and_report(
+    ctx=ctx,
+    event_to_id=event_to_id,
+    df_events=df_events,
 )
 
-# ------------------------------------------------------------
-# Tabla 2 — Recuento por medida
-# ------------------------------------------------------------
 
-measure_counts = {}
-for ev_id, cnt in counts.items():
-    m = extract_measure(inv_event[ev_id])
-    measure_counts[m] = measure_counts.get(m, 0) + cnt
-
-df_measure_counts = (
-    pd.DataFrame(
-        [{"measure": m, "count": c} for m, c in measure_counts.items()]
-    )
-    .sort_values("measure")
-    .reset_index(drop=True)
-)
-
-# ------------------------------------------------------------
-# Índice inverso: event_id → posiciones
-# ------------------------------------------------------------
-
-event_positions = {ev_id: [] for ev_id in event_to_id.values()}
-for idx, evs in enumerate(df_events["events"].values):
-    for ev in evs:
-        event_positions[ev].append(idx)
-
-for ev_id in event_positions:
-    event_positions[ev_id] = np.array(event_positions[ev_id], dtype=np.int64)
-
-# ------------------------------------------------------------
-# Tabla 3 — Interarrival por evento (solo num_appearances > 0)
-# ------------------------------------------------------------
-
-interarrival_rows = []
-
-for ev_id, positions in event_positions.items():
-    if len(positions) == 0:
-        continue
-
-    epochs = df_events.iloc[positions][epoch_col].values.astype(float)
-
-    if len(epochs) < 2:
-        interarrival_rows.append({
-            "event_id": ev_id,
-            "event_name": inv_event[ev_id],
-            "num_appearances": len(epochs),
-            "num_intervals": 0,
-            "mean_interarrival": None,
-            "std_interarrival": None,
-            "min_interarrival": None,
-            "max_interarrival": None,
-        })
-        continue
-
-    deltas = np.diff(epochs)
-    deltas = deltas[deltas >= 0]
-
-    if len(deltas) == 0:
-        interarrival_rows.append({
-            "event_id": ev_id,
-            "event_name": inv_event[ev_id],
-            "num_appearances": len(epochs),
-            "num_intervals": 0,
-            "mean_interarrival": None,
-            "std_interarrival": None,
-            "min_interarrival": None,
-            "max_interarrival": None,
-        })
-        continue
-
-    interarrival_rows.append({
-        "event_id": ev_id,
-        "event_name": inv_event[ev_id],
-        "num_appearances": len(epochs),
-        "num_intervals": len(deltas),
-        "mean_interarrival": float(np.mean(deltas)),
-        "std_interarrival": float(np.std(deltas)),
-        "min_interarrival": float(np.min(deltas)),
-        "max_interarrival": float(np.max(deltas)),
-    })
-
-df_interarrival_stats = (
-    pd.DataFrame(interarrival_rows)
-    .sort_values("event_id")
-    .reset_index(drop=True)
-)
-
-# ------------------------------------------------------------
-# FIGURAS — Interarrival por EVENTO (unidades Tu)
-# ------------------------------------------------------------
-
-interarrival_event_info = {}
-
-for _, row in df_interarrival_stats.iterrows():
-    ev_id = row["event_id"]
-    ev_name = row["event_name"]
-    positions = event_positions[ev_id]
-
-    if len(positions) < 3:
-        interarrival_event_info[ev_id] = {"has_fig": False, "reason": "<3 apariciones"}
-        continue
-
-    epochs = df_events.iloc[positions][epoch_col].values.astype(float)
-    deltas = np.diff(epochs)
-    deltas = deltas[deltas >= 0]
-
-    if len(deltas) < 2:
-        interarrival_event_info[ev_id] = {"has_fig": False, "reason": "intervalos insuficientes"}
-        continue
-
-    deltas_TU = deltas / Tu
-    clipped = np.clip(deltas_TU, 0, MAX_X_TU)
-
-    fig_path = FIGURES_DIR / f"interarrival_event_{ev_id}.png"
-
-    def _plot():
-        bins = min(MAX_BINS, len(np.unique(clipped)))
-        plt.hist(clipped, bins=bins, edgecolor="black")
-        plt.xlabel("Tiempo entre llegadas (Tu)")
-        plt.ylabel("count")
-        plt.title(f"Interarrival — {ev_name}")
-        plt.xlim(0, MAX_X_TU)
-        if np.any(deltas_TU > MAX_X_TU):
-            plt.annotate(
-                "→",
-                xy=(MAX_X_TU, plt.ylim()[1] * 0.9),
-                color="red",
-                fontsize=20,
-                ha="center",
-            )
-
-    save_figure(fig_path, plot_fn=_plot, figsize=(10, 4))
-
-    interarrival_event_info[ev_id] = {
-        "has_fig": True,
-        "file": fig_path.name,
-        "num_app": int(len(epochs)),
-    }
-
-# ------------------------------------------------------------
-# FIGURAS — Interarrival por MEDIDA (unidades Tu)
-# ------------------------------------------------------------
-
-interarrival_measure_info = {}
-
-for measure in df_measure_counts["measure"]:
-    ev_ids = [
-        ev_id for ev_id, name in inv_event.items()
-        if extract_measure(name) == measure
-    ]
-
-    all_pos = []
-    for ev_id in ev_ids:
-        all_pos.extend(event_positions[ev_id].tolist())
-
-    all_pos = np.array(sorted(all_pos), dtype=np.int64)
-
-    if len(all_pos) < 3:
-        interarrival_measure_info[measure] = {"has_fig": False, "reason": "<3 eventos"}
-        continue
-
-    epochs = df_events.iloc[all_pos][epoch_col].values.astype(float)
-    deltas = np.diff(epochs)
-    deltas = deltas[deltas >= 0]
-
-    if len(deltas) < 2:
-        interarrival_measure_info[measure] = {"has_fig": False, "reason": "intervalos insuficientes"}
-        continue
-
-    deltas_TU = deltas / Tu
-    clipped = np.clip(deltas_TU, 0, MAX_X_TU)
-
-    fig_path = FIGURES_DIR / f"interarrival_measure_{measure}.png"
-
-    def _plot():
-        bins = min(MAX_BINS, len(np.unique(clipped)))
-        plt.hist(clipped, bins=bins, edgecolor="black")
-        plt.xlabel("Tiempo entre llegadas (Tu)")
-        plt.ylabel("count")
-        plt.title(f"Interarrival — medida {measure}")
-        plt.xlim(0, MAX_X_TU)
-        if np.any(deltas_TU > MAX_X_TU):
-            plt.annotate(
-                "→",
-                xy=(MAX_X_TU, plt.ylim()[1] * 0.9),
-                color="red",
-                fontsize=20,
-                ha="center",
-            )
-
-    save_figure(fig_path, plot_fn=_plot, figsize=(10, 4))
-
-    interarrival_measure_info[measure] = {
-        "has_fig": True,
-        "file": fig_path.name,
-        "num_events": int(len(all_pos)),
-    }
-
-# ------------------------------------------------------------
-# Informe HTML final
-# ------------------------------------------------------------
-
-REPORT_PATH = VARIANT_DIR / "02_prepareeventsds_report.html"
-
-sections = []
-
-sections.append(f"<h1>PrepareEventsDS Report — Variante {ACTIVE_VARIANT}</h1>")
-sections.append(f"<p><b>Fase padre:</b> {parent_phase}:{parent_variant}</p>")
-sections.append(f"<p><b>Tu:</b> {Tu}</p>")
-sections.append(f"<p><b>Band thresholds (%):</b> {band_thresholds_pct}</p>")
-sections.append(f"<p><b>Event strategy:</b> {event_strategy}</p>")
-sections.append(f"<p><b>NaN handling:</b> {nan_handling}</p>")
-sections.append("<hr>")
-
-total_events = len(flat_events)
-epochs_with_events = (df_events["events"].apply(len) > 0).sum()
-
-sections.append("<h2>Estadísticas globales</h2>")
-sections.append(f"<p>Epochs totales: {len(df_events)}</p>")
-sections.append(f"<p>Eventos totales: {total_events}</p>")
-sections.append(f"<p>Tipos de evento distintos: {len(counts)}</p>")
-sections.append(f"<p>Epochs con ≥1 evento: {epochs_with_events}</p>")
-sections.append(f"<p>Eventos medios por epoch: {total_events/len(df_events):.3f}</p>")
-
-sections.append("<h2>Recuento por tipo de evento</h2>")
-sections.append(df_event_counts.to_html(index=False))
-
-sections.append("<h2>Recuento por medida</h2>")
-sections.append(df_measure_counts.to_html(index=False))
-
-sections.append("<h2>Estadísticas interarrival por evento</h2>")
-sections.append(df_interarrival_stats.to_html(index=False))
-
-sections.append("<h2>Interarrival por evento (unidades Tu)</h2>")
-for ev_id, info in interarrival_event_info.items():
-    sections.append(f"<h3>Evento {ev_id}: {inv_event[ev_id]}</h3>")
-    if not info["has_fig"]:
-        sections.append(f"<p><i>No se genera figura: {info.get('reason')}</i></p>")
-        continue
-    sections.append(f"<p>Apariciones: {info['num_app']}</p>")
-    sections.append(f"<img src='figures/{info['file']}' width='800'>")
-
-sections.append("<h2>Interarrival por medida (unidades Tu)</h2>")
-for measure, info in interarrival_measure_info.items():
-    sections.append(f"<h3>Medida {measure}</h3>")
-    if not info["has_fig"]:
-        sections.append(f"<p><i>No se genera figura: {info.get('reason')}</i></p>")
-        continue
-    sections.append(f"<p>Nº eventos asociados: {info['num_events']}</p>")
-    sections.append(f"<img src='figures/{info['file']}' width='800'>")
-
-with open(REPORT_PATH, "w", encoding="utf-8") as f:
-    f.write("<html><body>" + "\n".join(sections) + "</body></html>")
-
-print(f"[prepareeventsds] Informe HTML generado en {REPORT_PATH}")
 print("[prepareeventsds] Fase 02 completada correctamente.")
 
 print("[STATS DEBUG] filas totales:", len(df_events))

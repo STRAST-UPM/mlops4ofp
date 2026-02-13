@@ -1,95 +1,120 @@
-````markdown
-# Fase 01 — Explore
 
-Este documento explica cómo trabajar con la Fase 01 (`01_explore`) del pipeline: objetivos `make`, parámetros relevantes, entradas y salidas esperadas, y un resumen de los pasos principales. El `notebook` y la `script` de esta fase realizan tareas equivalentes; usa el `notebook` para entender el flujo y la `script` para ejecuciones reproducibles en batch.
+# Fase 01 — Explore: Análisis y Limpieza del Dataset
+Este documento explica cómo trabajar con la Fase 01 (`01_explore`) del pipeline.Su objetivo es explorar el dataset RAW, aplicar limpiezas iniciales y generar un dataset intermedio listo para la fase 02.
 
-## Propósito de la fase
-- Explorar el dataset RAW, aplicar limpieza y transformaciones iniciales.
-- Generar un dataset intermedio (parquet) listo para la fase 02.
-- Generar metadatos, parámetros usados y un informe (HTML/JSON) con estadísticas y figuras.
 
-## Ubicaciones clave
-- Scripts/notebook: `notebooks/01_explore.ipynb`, `scripts/01_explore.py`
-- Parámetros base: `executions/01_explore/base_params.yaml` (y plantillas en `params/01_explore/` si existen)
-- Variantes y artefactos: `executions/01_explore/<VARIANT>/`
+## 0. Contexto del Proyecto
+Trabajamos con el **MDS Dataset**, que contiene mediciones de un edificio inteligente con microred eléctrica en el **Aperture Center** (Albuquerque, EE. UU.). El sistema gestiona paneles solares, baterías, generadores de gas y pilas de combustible mediante un sistema inteligente (BEMS).
 
-## Artefactos generados (salidas típicas)
-En `executions/01_explore/<VARIANT>/` normalmente encontrarás:
-- `01_explore_dataset.parquet` — dataset procesado (principal salida)
-- `01_explore_metadata.json` — metadatos del procesamiento (fechas, conteos)
-- `01_explore_params.json` o `params.yaml` — parámetros aplicados a la variante
-- `01_explore_report.html` — informe de exploración (figuras, tablas)
-- `figures/` — figuras generadas (si procede)
+![Esquema de la microred del Aperture Center]( BEMS_Configuration.png)
 
-> Nota: los nombres concretos pueden variar ligeramente según la versión del script; los targets `make` de comprobación esperan los nombres listados en `Makefile`.
+El conjunto de datos recoge las medidas de potencia, voltaje, frecuencia y temperatura  correspondientes a un periodo de aproximadamente **15 meses** (mayo de 2022 – julio de 2023). 
 
-## Parámetros y objetivos `make` de la fase
+## 1. Configuración de Variantes
 
-Resumen de los objetivos más usados (ejemplos de uso más abajo):
+Una **variante** (`vNNN`) es una configuración específica de parámetros. Esto permite experimentar con distintas estrategias de limpieza manteniendo la trazabilidad.
 
-- `make variant1 VARIANT=vNNN RAW=/ruta/dataset [CLEANING_STRATEGY=...] [NAN_VALUES='[...]'] [ERROR_VALUES='...']`
-  - `VARIANT`: identificador `vNNN` (obligatorio). Ej.: `v001`.
-  - `RAW`: ruta al dataset RAW (obligatorio para crear la variante).
-  - `CLEANING_STRATEGY`: estrategia de limpieza (ej.: `basic`) — controla limpiezas por defecto.
-  - `NAN_VALUES`: lista de valores que se tratarán como NaN (ej.: `'[-999999]'`).
-  - `ERROR_VALUES`: json string por columna con valores inválidos a tratar (ej.: '{"col1":[-1]}').
-
-- `make nb1-run VARIANT=vNNN`
-  - Ejecuta `notebooks/01_explore.ipynb` in-place con `ACTIVE_VARIANT=VARIANT`.
-  - Útil para inspección interactiva y generación de figuras paso a paso.
-
-- `make script1-run VARIANT=vNNN`
-  - Ejecuta `scripts/01_explore.py --variant vNNN` vía el intérprete definido por el Makefile.
-  - Preferible para ejecuciones automatizadas y reproducibles.
-
-- `make script1-check-results VARIANT=vNNN`
-  - Verifica la existencia de los artefactos principales en `executions/01_explore/$(VARIANT)`.
-
-- `make script1-check-dvc`
-  - Ejecuta comprobaciones DVC locales/remotas (si usas DVC).
-
-- `make publish1 VARIANT=vNNN` (se dejará para cuando publiques)
-  - Valida la variante con `mlops4ofp/tools/traceability.py` y registra artefactos en DVC/git.
-
-- `make remove1 VARIANT=vNNN`
-  - Elimina la carpeta de la variante y actualiza el registro de variantes (solo si no tiene hijos).
-
-- `make clean1-all`
-  - Elimina todas las variantes de la Fase 01 y su `variants.yaml` (limpieza local).
-
-## Flujo de trabajo recomendado (pasos principales)
-1. Crear la variante (parámetros):
-   - `make variant1 VARIANT=v001 RAW=./data/raw.csv CLEANING_STRATEGY=basic NAN_VALUES='[-999999]'
-`
-   - Esto registra la variante (crea `executions/01_explore/v001/params.yaml`).
-2. Ejecutar el `notebook` para exploración interactiva (opcional):
-   - `make nb1-run VARIANT=v001` — abre/ejecuta el notebook in-place y escribe figuras/informes.
-   - El notebook respeta la variable de entorno `ACTIVE_VARIANT` para cargar parámetros.
-3. Ejecutar la `script` para producción/reproducción:
-   - `make script1-run VARIANT=v001` — generará el parquet y los artefactos en `executions/01_explore/v001/`.
-4. Verificar resultados:
-   - `make script1-check-results VARIANT=v001` — asegurarse que los archivos esperados están presentes.
-   - `make script1-check-dvc` — opcional, verificar estado DVC.
-5. Si procede, publicar los artefactos con DVC/git (pendiente en este repo):
-   - `make publish1 VARIANT=v001` — solo una vez que quieras añadir los artefactos al control remoto.
-
-## Recomendaciones y notas prácticas
-- Usa el `notebook` para entender salidas, inspeccionar estadísticas y ajustar parámetros. Una vez definidos, usa la `script` para ejecutar en batch.
-- Las variantes deben nombrarse `vNNN` (ej.: `v001`) para mantener trazabilidad.
-- Si no vas a usar DVC inmediatamente, la publicación puede posponerse; en este repo `dvc.yaml` ha sido movido a `legacy/` para evitar confusión.
-- Si quieres reproducir exactamente el entorno, activa el virtualenv del proyecto: `source .venv/bin/activate`.
-
-## Ejemplo rápido
-1. Crear variante y ejecutar todo (interactivo + reproducible):
 ```bash
-make variant1 VARIANT=v001 RAW=./data/raw.csv CLEANING_STRATEGY=basic NAN_VALUES='[-999999]'
-make nb1-run VARIANT=v001      # inspeccionar/ajustar en notebook
-make script1-run VARIANT=v001  # ejecución reproducible
-make script1-check-results VARIANT=v001
+make variant1 VARIANT=v001 RAW=data/raw.csv [opciones]
+```
+#### Parámetros de configuración
+
+| Parámetro | Relevancia | Descripción | Ejemplo |
+|-----------|-----------|-------------|----------------------|
+| `VARIANT` | Obligatorio | Identificador único (`v001`, `v002`...) | `v001` |
+| `RAW` | Obligatorio | Ruta al archivo CSV original | `data/raw.csv` |
+| `CLEANING_STRATEGY` | Opcional | Estrategia de limpieza aplicada : `none` (defecto),  `basic` , `full` |  `basic`  |
+| `NAN_VALUES` | Opcional | Lista de valores a tratar como NaN | `'[-999999]'` |
+| `ERROR_VALUES` | Opcional | Diccionario JSON de valores erróneos | `'{"voltage":[-1]}'` |
+
+#### Estrategias de limpieza
+
+- **`none`**: no aplica limpieza.
+- **`basic`**: convierte en NaN los valores definidos en `NAN_VALUES`.
+- **`full`**: aplica `NAN_VALUES` + reglas específicas por columna de `ERROR_VALUES`.
+
+
+
+> **Nota:** A continuación se muestra un ejemplo completo de creación de variante con parámetros específicos.
+>
+> ```bash
+> make variant1 VARIANT=v005 RAW=data/raw.csv \
+>   CLEANING_STRATEGY=basic \
+>   NAN_VALUES="[-999999, None]" \
+>   ERROR_VALUES='{"Battery_Active_Power":[-1],"MG-LV-MSB_Frequency":[-327.0]}'
+> ```
+>
+> El archivo generado `executions/01_explore/v005/params.yaml` quedará:
+>
+> ```yaml
+> cleaning_strategy: basic
+> nan_values:
+>   - -999999.0
+> error_values_by_column:
+>   Battery_Active_Power:
+>     - -1
+>   MG-LV-MSB_Frequency:
+>     - -327.0
+> raw_dataset_path: data/raw.csv
+> ```
+
+## Flujo de trabajo recomendado
+
+### Paso 1: Inicialización
+
+```bash
+make variant1 VARIANT=v001 RAW=data/raw.csv CLEANING_STRATEGY=basic NAN_VALUES="[-999999]"
 ```
 
----
+### Paso 2: Ejecución
 
-Si quieres, puedo agregar ejemplos más detallados de valores para `CLEANING_STRATEGY` y `ERROR_VALUES`, o generar una plantilla `params/01_explore/example_params.yaml` para acelerar la creación de variantes.
+El código fuente de esta fase reside en `scripts/01_explore.py` y el notebook en `notebooks/01_explore.ipynb`. Ambos realizan exactamente las mismas tareas: cargar los datos, diagnosticarlos y aplicar la limpieza definida en tu variante.
 
-````
+Puedes elegir cualquiera de estas tres formas para ejecutar la fase:
+
+#### Opción A: Ejecución automática del Notebook
+
+```bash
+make nb1-run VARIANT=v001
+```
+
+Ejecuta todo el notebook de principio a fin desde la terminal, inyectando los parámetros de tu variante.
+
+#### Opción B: Ejecución mediante Script (Producción)
+
+```bash
+make script1-run VARIANT=v001
+```
+
+Es la forma más rápida y eficiente. Se recomienda una vez que ya tienes claros tus parámetros y solo quieres generar los archivos de salida.
+
+#### Opción C: Ejecución manual en Notebook
+
+Si prefieres trabajar dentro de la interfaz de Jupyter o VS Code, abre `notebooks/01_explore.ipynb` y busca la segunda celda. Allí podrás forzar la variante que necesites:
+
+```python
+# En la segunda celda del notebook:
+env_variant = "v001"  # Descomenta y asigna el ID de tu variante aquí
+
+```
+
+> Nota: Al asignar este valor, el notebook ignorará cualquier configuración previa y cargará los parámetros de executions/01_explore/v001/params.yaml.
+
+
+### Paso 3: Verificación
+Asegúrate de que todos los archivos se han generado correctamente:
+```bash
+make script1-check-results VARIANT=v001
+  ```
+
+## 3. Artefactos Generados (Salidas)
+
+Los resultados se guardan en `executions/01_explore/<VARIANT>/`:
+
+- **`01_explore_dataset.parquet`** — Dataset procesado y optimizado (salida principal)
+- **`01_explore_report.html`** — Informe con figuras. Ábrelo en tu navegador para validar visualmente la calidad de los datos.
+- **`01_explore_metadata.json`** — Metadatos del proceso (fechas, conteos de filas)
+- **`params.yaml`** — Copia de los parámetros utilizados para asegurar la trazabilidad
+- **`figures/`** — Directorio con figuras generadas
+
+

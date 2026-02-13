@@ -1,102 +1,127 @@
-# Fase 03 — PrepareWindowsDS
+# Fase 03 — PrepareWindowsDS: Ventanas Temporales
 
-Este documento explica cómo trabajar con la Fase 03 (`03_preparewindowsds`), la fase final del pipeline: objetivos `make`, parámetros relevantes, entradas y salidas esperadas, y un resumen de los pasos principales. El notebook y la script de esta fase realizan tareas equivalentes.
+En esta **Fase 03** (`prepareWindowsDS`) transformamos el dataset de eventos discretos, generado en la **Fase 02**, en un formato de ventanas deslizantes. 
 
-## Propósito de la fase
-- Generar el dataset FINAL de **ventanas temporales** a partir del dataset de eventos (Fase 02).
-- Cada fila contiene una ventana de observación (OW) y una ventana de predicción (PW) con sus eventos materializados.
-- Soportar múltiples estrategias de alineación de ventanas (sincronia, asincronia, etc.).
-- Generar un dataset parquet listo para modelos predictivos junto con metadatos y reportes.
+> ⚠️ **Prerequisito:** Debes haber ejecutado correctamente la Fase 02  
+> (necesitas una variante `vNNN` disponible en `executions/02_prepareeventsds/`).
 
-## Ubicaciones clave
-- Scripts/notebook: `notebooks/03_preparewindowsds.ipynb`, `scripts/03_preparewindowsds.py`
-- Parámetros base: `executions/03_preparewindowsds/base_params.yaml`
-- Variantes y artefactos: `executions/03_preparewindowsds/<VARIANT>/`
-- Exportación (opcional): `exports/03_preparewindowsds/<VARIANT>/` (via `make export3`).
+## 0. Concepto Clave: Ventanas Temporales
 
-## Entradas requeridas
-Para ejecutar la Fase 03, necesitas:
-- Una variante de la **Fase 02** (padre) que ya haya generado sus artefactos (incluyendo el catálogo de eventos).
-- Tu variante de la Fase 03 debe tener un `parent_variant` que apunte a una variante existente de F02.
+Para que un modelo aprenda a predecir el futuro, necesitamos presentarle los datos en parejas de Pasado (Observación) y Futuro (Predicción).
 
-## Artefactos generados (salidas típicas)
-En `executions/03_preparewindowsds/<VARIANT>/` normalmente encontrarás:
-- `03_preparewindowsds_dataset.parquet` — dataset de ventanas (principal salida, listo para ML)
-- `03_preparewindowsds_metadata.json` — metadatos (conteos, rangos, estrategia)
-- `03_preparewindowsds_stats.json` — estadísticas detalladas del dataset
-- `03_preparewindowsds_params.json` o `params.yaml` — parámetros aplicados a la variante
-- `03_preparewindowsds_report.html` — informe final con tablas y figuras
-- `figures/` — figuras generadas
+#### Componentes de una ventana
 
-## Parámetros y objetivos `make` de la fase
+| Componente | Descripción |
+|------------|-------------|
+| **Observation Window (OW)** | Contiene los eventos ocurridos en los últimos instantes temporales |
+| **Prediction Window (PW)** | Contiene los eventos que ocurren después de la ventana de observación |
+| **Lead Time (LT)** | Separación temporal entre la ventana de observación y la de predicción |
 
-Resumen de los objetivos más usados:
+De forma esquemática:
 
-- `make variant3 VARIANT=vNNN PARENT=vMMM OW=<int> LT=<int> PW=<int> WS=<strategy> NAN=<strategy>`
-  - `VARIANT`: identificador `vNNN` (obligatorio). Ej.: `v111`.
-  - `PARENT`: variante padre de Fase 02 (obligatorio). Ej.: `v011`.
-  - `OW`: tamaño de la ventana de observación en segundos (ej.: `600`).
-  - `LT`: lag temporal (delay) entre ventana de observación y predicción en segundos (ej.: `300`).
-  - `PW`: tamaño de la ventana de predicción en segundos (ej.: `600`).
-  - `WS`: estrategia de alineación (`synchro`, `asynOW`, `withinPW`, `asynPW`, etc.).
-  - `NAN`: manejo de pares de ventanas que contienen NaN (`preserve` o `discard`).
+![Esquema de enventanado](windows.png)
 
-- `make nb3-run VARIANT=vNNN`
-  - Ejecuta `notebooks/03_preparewindowsds.ipynb` in-place con `ACTIVE_VARIANT=VARIANT`.
-  - Útil para inspección del dataset de ventanas y validación de parámetros.
+> 💡 **Objetivo:** Aprender relaciones del tipo:  
+> *"Dado lo que ha ocurrido en la ventana de observación **OW**, ¿qué eventos ocurrirán en la ventana de predicción **PW** tras esperar un tiempo **LT**?"*
 
-- `make script3-run VARIANT=vNNN`
-  - Ejecuta `scripts/03_preparewindowsds.py --variant vNNN`.
-  - Preferible para ejecuciones automatizadas y reproducibles.
+### Estructura del dataset final de la fase 03
 
-- `make script3-check-results VARIANT=vNNN`
-  - Verifica la existencia de los artefactos principales en `executions/03_preparewindowsds/$(VARIANT)`.
+El dataset generado en esta fase tiene una estructura **por ventanas**, no por instantes individuales.
+Cada fila representa una muestra de entrenamiento completa.
 
-- `make script3-check-dvc`
-  - Ejecuta comprobaciones DVC locales/remotas.
+| Columna | Descripción |
+|---------|-------------|
+| `OW_events` | Lista de `event_id` en la ventana de observación |
+| `PW_events` | Lista de `event_id` en la ventana de predicción |
 
-- `make export3 VARIANT=vNNN PARENT=vMMM`
-  - Exporta el dataset final, metadatos y catálogo de eventos a `exports/03_preparewindowsds/$(VARIANT)/`.
-  - Útil para compartir o integrar con otros sistemas.
+### Ejemplo conceptual
 
-- `make publish3 VARIANT=vNNN` (se dejará para cuando publiques)
-  - Valida la variante con `mlops4ofp/tools/traceability.py` y registra artefactos en DVC/git.
+| index | OW_events | PW_events |
+|-------|-----------|-----------|
+| 0 | `[12, 45, 78]` | `[90]` |
+| 1 | `[45, 78]` | `[]` |
+| 2 | `[78, 90]` | `[102, 110]` |
 
-- `make remove3 VARIANT=vNNN`
-  - Elimina la carpeta de la variante (solo si no tiene hijos).
+## Catálogo de Eventos
 
-- `make clean3-all`
-  - Elimina todas las variantes de la Fase 03 y su `variants.yaml`.
+La correspondencia entre código de evento y significado físico se encuentra en el catálogo generado en la fase 02 padre:
 
-## Flujo de trabajo recomendado (pasos principales)
-1. Crear la variante (parámetros):
-   - `make variant3 VARIANT=v111 PARENT=v011 OW=600 LT=300 PW=600 WS=synchro NAN=preserve`
-   - Esto registra la variante (crea `executions/03_preparewindowsds/v111/params.yaml`).
-2. Ejecutar el notebook para exploración (opcional):
-   - `make nb3-run VARIANT=v111` — inspecciona ventanas, conteos y distribuciones.
-3. Ejecutar la script para producción:
-   - `make script3-run VARIANT=v111` — generará el parquet y los artefactos finales.
-4. Verificar resultados:
-   - `make script3-check-results VARIANT=v111` — asegurarse que los archivos esperados están presentes.
-5. Exportar (opcional, si necesitas compartir):
-   - `make export3 VARIANT=v111 PARENT=v011` — copia el dataset final a `exports/03_preparewindowsds/v111/`.
-
-## Recomendaciones y notas prácticas
-- **Dependencia de Fase 02**: la variante padre (ej.: `v011`) debe haber completado `script2-run` antes de ejecutar `script3-run`.
-- Experimenta con diferentes valores de `OW`, `LT`, `PW` y `WS` para ajustar la estructura de ventanas.
-- Los parámetros `OW`, `LT`, `PW` suelen ser múltiplos de `Tu` (paso temporal de F01).
-- El dataset generado en esta fase es el dataset FINAL listo para entrenar modelos predictivos.
-- `export3` es útil si necesitas compartir el dataset con otros equipos o sistemas sin acceso directo al repositorio.
-
-## Ejemplo rápido
-```bash
-make variant3 VARIANT=v111 PARENT=v011 OW=600 LT=300 PW=600 WS=synchro NAN=preserve
-make nb3-run VARIANT=v111      # inspeccionar en notebook
-make script3-run VARIANT=v111  # ejecución reproducible
-make script3-check-results VARIANT=v111
-make export3 VARIANT=v111 PARENT=v011  # exportar si lo necesitas
+```
+executions/02_prepareeventsds/<variante>/02_prepareeventsds_event_catalog.json
 ```
 
----
+Este archivo es esencial para interpretar los `event_id` en las columnas `OW_events` y `PW_events`.
 
-Felicidades: al completar la Fase 03, tienes el dataset final listo para modelado predictivo. Los artefactos están en `executions/03_preparewindowsds/v111/` y, opcionalmente, en `exports/03_preparewindowsds/v111/`.
+
+
+
+## 1. Configuración de Variantes
+
+```bash
+make variant3 VARIANT=v111 PARENT=v011 OW=600 LT=300 PW=600 WS=synchro NAN=preserve
+```
+
+### Parámetros
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `VARIANT` | Identificador de la nueva variante |
+| `PARENT` | Variante de Fase 02 sobre la que se construyen las ventanas |
+| `OW` | Tamaño de la ventana de observación (en segundos) |
+| `LT` | Lead time entre OW y PW (en segundos) |
+| `PW` | Tamaño de la ventana de predicción (en segundos) |
+| `WS` | Estrategia de ventana (`synchro`, `asynOW`, `withinPW`, `asynPW`) |
+| `NAN` | Tratamiento de valores faltantes (`preserve`, `discard`) |
+
+> Los parámetros efectivos quedan registrados en el archivo `executions/03_preparewindowsds/vNNN/params.yaml` de la variante.
+
+## 2. Flujo de Trabajo Recomendado
+
+### Paso 1: Inicialización
+
+```bash
+make variant3 VARIANT=v111 PARENT=v011 OW=600 LT=300 PW=600 WS=synchro
+```
+
+### Paso 2: Ejecución
+
+El código reside en `scripts/03_preparewindowsds.py` y el notebook en `notebooks/03_preparewindowsds.ipynb`. Elige tu vía:
+
+**Opción A: Ejecución automática del Notebook**
+
+```bash
+make nb3-run VARIANT=v111
+```
+
+**Opción B: Ejecución mediante Script (Producción)**
+
+```bash
+make script3-run VARIANT=v111
+```
+
+**Opción C: Ejecución manual en Notebook**
+
+Abre el notebook y configura la **cuarta** celda:
+
+```python
+env_variant = "v111"  # Descomenta y asigna tu variante
+```
+
+### Paso 3: Verificación
+
+Asegúrate de que todos los archivos se han generado correctamente:
+
+```bash
+make script3-check-results VARIANT=v111
+```
+
+## 3. Artefactos Generados (Salidas)
+
+Los resultados se guardan en `executions/03_preparewindowsds/<VARIANT>/`:
+
+| Archivo | Contenido |
+|---------|-----------|
+| `03_preparewindowsds_dataset.parquet` | Dataset Final. Listo para alimentar modelos de IA. |
+| `03_preparewindowsds_report.html` | Informe Final. Estadísticas de balanceo de clases y densidad de ventanas. |
+| `03_preparewindowsds_metadata.json` | Información técnica del enventanado y tiempos. |
+| `params.yaml` | Registro de la configuración (OW, PW, LT, etc.). |

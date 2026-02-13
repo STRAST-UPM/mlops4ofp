@@ -95,14 +95,17 @@ clean-setup:
 # ENTORNO DE EJECUCIÓN (PIPELINE)
 ############################################
 
+ifeq ($(OS),Windows_NT)
+PYTHON := .venv/Scripts/python.exe
+DVC := .venv/Scripts/dvc.exe
+else
 ifneq ("$(wildcard .venv/bin/python3)","")
 PYTHON := .venv/bin/python3
 DVC := .venv/bin/dvc
 else
-# Si no existe .venv, usar los ejecutables del sistema para permitir targets
-# como `make setup` que crean el entorno virtual.
 PYTHON := python3
 DVC := dvc
+endif
 endif
 
 $(info [INFO] Usando intérprete Python: $(PYTHON))
@@ -626,8 +629,8 @@ remove3-all:
 script3-check-results: check-variant-format
 	$(MAKE) check-results-generic PHASE=$(PHASE3) VARIANTS_DIR=$(VARIANTS_DIR_03) \
 		VARIANT=$(VARIANT) CHECK_FILES="03_preparewindowsds_dataset.parquet \
-		03_preparewindowsds_metadata.json 03_preparewindowsds_report.html \
-		03_preparewindowsds_stats.json"
+		03_preparewindowsds_metadata.json 03_preparewindowsds_report.html "
+
 
 ############################################
 # 7. CHEQUEO DE DVC PARA FASE 03
