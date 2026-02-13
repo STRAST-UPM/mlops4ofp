@@ -1,0 +1,30 @@
+services:
+  mds-dashboard:
+    image: stehedor/mds_windows_app:v0
+    container_name: mds_windows
+    pull_policy: always
+    ports:
+      - "8060:8050"
+    volumes:
+      - ../../executions:/app/executions
+      # - ./epoch_processed:/app/epoch_processed
+      - ./files_output/queries:/app/output/
+      - ./files_output/multi_requests_file.yml:/app/scripts/multi_requests_file.yml
+
+    environment:
+      SERVER_PORT: 8060
+      WINDOW_VERSION: "v001"
+      OBS_EVENTS_COLUMN: "OW_events"
+      PRED_EVENTS_COLUMN: "PW_events"
+      # DATASET_RAW_PATH: "executions/03_preparewindowsds"
+      # DATASET_PROCESSED_PATH:  "datasets/processed"
+      # OUTPUT_DIR: "output"
+
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: "2.0"
+        reservations:
+          memory: 2G
+    restart: unless-stopped
