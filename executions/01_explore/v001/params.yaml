@@ -1,0 +1,5 @@
+cleaning_strategy: basic
+nan_values:
+- -999999
+error_values_by_column: {}
+raw_dataset_path: ./data/raw.csv

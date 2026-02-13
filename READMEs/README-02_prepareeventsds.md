@@ -1,95 +1,124 @@
-# Fase 02 — PrepareEventsDS
+# Fase 02: PrepareEventsDS: Discretización y Eventos
 
-Este documento explica cómo trabajar con la Fase 02 (`02_prepareeventsds`) del pipeline: objetivos `make`, parámetros relevantes, entradas y salidas esperadas, y un resumen de los pasos principales. El notebook y la script de esta fase realizan tareas equivalentes.
+En esta fase transformamos las señales continuas de la Fase 01 (potencias, voltajes, etc.) en un **dataset de eventos discretos**. Cada fila del nuevo dataset representará un instante temporal con los eventos que han ocurrido en él.
 
-## Propósito de la fase
-- Generar el dataset de **eventos** a partir del dataset explorado de la Fase 01.
-- Detectar eventos mediante estrategias de niveles, transiciones o ambas.
-- Generar un catálogo de eventos (nombre → ID), estadísticas min/max y un informe.
-- Producir un dataset intermedio de eventos listo para la Fase 03.
+> **Prerequisito:** Necesitas haber completado exitosamente una ejecución de Fase 01 (tendrás una variante `vNNN` en `executions/01_explore/`)
 
-## Ubicaciones clave
-- Scripts/notebook: `notebooks/02_prepareeventsds.ipynb`, `scripts/02_prepareeventsds.py`
-- Parámetros base: `executions/02_prepareeventsds/base_params.yaml`
-- Variantes y artefactos: `executions/02_prepareeventsds/<VARIANT>/`
+## 0. Conceptos clave: De Señales a Eventos
 
-## Entradas requeridas
-Para ejecutar la Fase 02, necesitas:
-- Una variante de la **Fase 01** (padre) que ya haya generado sus artefactos.
-- Tu variante de la Fase 02 debe tener un `parent_variant` que apunte a una variante existente de F01.
+### Discretización en Bandas
 
-## Artefactos generados (salidas típicas)
-En `executions/02_prepareeventsds/<VARIANT>/` normalmente encontrarás:
-- `02_prepareeventsds_dataset.parquet` — dataset de eventos (principal salida)
-- `02_prepareeventsds_bands.json` — bandas de detección de eventos
-- `02_prepareeventsds_event_catalog.json` — catálogo de eventos (nombre → ID)
-- `02_prepareeventsds_metadata.json` — metadatos del procesamiento
-- `02_prepareeventsds_params.json` o `params.yaml` — parámetros aplicados a la variante
-- `02_prepareeventsds_report.html` — informe de exploración (figuras, tablas)
-- `figures/` — figuras generadas (conteos de eventos, inter-llegadas, etc.)
+Las señales originales (potencia, frecuencia, voltaje) son continuas. Para "digitalizar" su comportamiento, las dividimos en bandas (rangos de valores) usando umbrales.
 
-## Parámetros y objetivos `make` de la fase
+Si configuramos `BANDS="40 60 90"`, estamos creando 4 zonas:
 
-Resumen de los objetivos más usados:
+- **Banda 1:** 0–40%
+- **Banda 2:** 40–60%
+- **Banda 3:** 60–90%
+- **Banda 4:** >90%
 
-- `make variant2 VARIANT=vNNN PARENT=vMMM BANDS="40 60 90" STRATEGY=both NAN=keep [Tu=<opcional>]`
-  - `VARIANT`: identificador `vNNN` (obligatorio). Ej.: `v011`.
-  - `PARENT`: variante padre de Fase 01 (obligatorio). Ej.: `v001`.
-  - `BANDS`: lista de porcentajes de corte para bandas de detección (ej.: `"40 60 90"`).
-  - `STRATEGY`: estrategia de eventos (`levels`, `transitions`, o `both`).
-  - `NAN`: manejo de NaN (`keep` o `discard`).
-  - `Tu`: opcional, paso temporal característico (ej.: `3600` segundos). Si no se especifica, se obtiene de la metadata de F01.
+Estas bandas son el "diccionario" que nos permite nombrar lo que ocurre en el sistema.
 
-- `make nb2-run VARIANT=vNNN`
-  - Ejecuta `notebooks/02_prepareeventsds.ipynb` in-place con `ACTIVE_VARIANT=VARIANT`.
-  - Útil para inspección interactiva del dataset de eventos y figuras.
+### Tipos de Eventos
 
-- `make script2-run VARIANT=vNNN`
-  - Ejecuta `scripts/02_prepareeventsds.py --variant vNNN`.
-  - Preferible para ejecuciones automatizadas y reproducibles.
+Una vez definidas las bandas, el pipeline detecta dos tipos de información en cada instante temporal:
 
-- `make script2-check-results VARIANT=vNNN`
-  - Verifica la existencia de los artefactos principales en `executions/02_prepareeventsds/$(VARIANT)`.
+- **Evento de Estado (Level):** Nos dice en qué banda está la señal en ese momento. Ejemplo: `GE_Active_Power_Level_2` (la señal está en el rango 40-60%).
+- **Evento de Transición (Transition):** Nos dice si la señal ha saltado de una banda a otra respecto al instante anterior. Ejemplo: `GE_Active_Power_B1-to-B2` (la potencia acaba de subir cruzando el umbral del 40%).
 
-- `make script2-check-dvc`
-  - Ejecuta comprobaciones DVC locales/remotas.
+### ¿Cómo luce el dataset final de fase 02?
 
-- `make publish2 VARIANT=vNNN` (se dejará para cuando publiques)
-  - Valida la variante con `mlops4ofp/tools/traceability.py` y registra artefactos en DVC/git.
+Cada fila representa un **instante temporal** y puede contener **cero, uno o varios eventos simultáneamente**.
 
-- `make remove2 VARIANT=vNNN`
-  - Elimina la carpeta de la variante (solo si no tiene hijos).
+| índice | segs       | events    |
+|--------|------------|-----------|
+| 2026   | 1651383461 | []        |
+| 2027   | 1651383671 | [113,120] |
+| 2028   | 1651383691 | [127]     |
+| 2029   | 1651383701 | []        |
+| 2030   | 1651387711 | []        |
+| 2031   | 1651388101 | [129]     |
 
-- `make clean2-all`
-  - Elimina todas las variantes de la Fase 02 y su `variants.yaml`.
+En la columna `events` se almacenan los identificadores (`event_id`) de los eventos que ocurren en ese instante temporal, que serán guardados en el catálogo de eventos.
 
-## Flujo de trabajo recomendado (pasos principales)
-1. Crear la variante (parámetros):
-   - `make variant2 VARIANT=v011 PARENT=v001 BANDS="40 60 90" STRATEGY=both NAN=keep`
-   - Esto registra la variante (crea `executions/02_prepareeventsds/v011/params.yaml`).
-2. Ejecutar el notebook para exploración interactiva (opcional):
-   - `make nb2-run VARIANT=v011` — inspecciona estadísticas de eventos y figuras.
-3. Ejecutar la script para producción:
-   - `make script2-run VARIANT=v011` — generará el parquet y los artefactos.
-4. Verificar resultados:
-   - `make script2-check-results VARIANT=v011` — asegurarse que los archivos esperados están presentes.
-5. Proceder a la Fase 03 usando `v011` como padre:
-   - `make variant3 VARIANT=v111 PARENT=v011 OW=600 LT=300 PW=600 WS=synchro NAN=preserve`
+## 1. Configuración de Variantes
 
-## Recomendaciones y notas prácticas
-- **Dependencia de Fase 01**: la variante padre (ej.: `v001`) debe haber completado `script1-run` antes de ejecutar `script2-run`.
-- Experimenta con diferentes valores de `BANDS` y `STRATEGY` para ajustar la detección de eventos.
-- `Tu` (paso temporal) normalmente se obtiene automáticamente de la metadata de F01; úsalo solo si necesitas override.
-- Las variantes deben nombrarse `vNNN` manteniendo la convención: F01 → v001..v0NN, F02 → v01N..v0NM, F03 → v1NN..v1NM.
+Una variante de Fase 02 depende directamente de una variante "padre" de la Fase 01. Parte del dataset generado por esta: `executions/01_explore/vNNN/01_explore_dataset.parquet`
 
-## Ejemplo rápido
 ```bash
-make variant2 VARIANT=v011 PARENT=v001 BANDS="40 60 90" STRATEGY=both NAN=keep
-make nb2-run VARIANT=v011      # inspeccionar en notebook
-make script2-run VARIANT=v011  # ejecución reproducible
+make variant2 VARIANT=v010 PARENT=v001 BANDS="40 60 90" STRATEGY=both NAN=keep
+```
+
+### Parámetros
+
+| Parámetro | Descripción | Ejemplo |
+|-----------|-------------|---------|
+| `VARIANT` | Identificador de la nueva variante (Fase 02) | `v010` |
+| `PARENT` | Variante de Fase 01 sobre la que se construye | `v001` o `v002` |
+| `BANDS` | Umbrales (%) para discretizar en bandas | `"40 60 90"` |
+| `STRATEGY` | Cómo detectar eventos (`levels`, `transitions`, `both`) | `both` |
+| `NAN` | Cómo tratar valores nulos (`keep` o `discard`) | `keep` |
+
+El archivo generado `params/02_prepareeventsds/v010/params.yaml` contendrá:
+
+```yaml
+parent_variant: v001
+bands_thresholds: [40, 60, 90]
+strategy: both
+nan_handling: keep
+```
+
+## 2. Flujo de Trabajo Recomendado
+
+### Paso 1: Inicialización
+
+```bash
+make variant2 VARIANT=v011 PARENT=v001 BANDS="10 25 50 75 90" STRATEGY=both NAN=keep
+```
+
+### Paso 2: Ejecución
+
+El código reside en `scripts/02_prepareeventsds.py` y el notebook en `notebooks/02_prepareeventsds.ipynb`. Elige tu vía:
+
+**Opción A: Ejecución automática del Notebook**
+
+```bash
+make nb2-run VARIANT=v011
+```
+
+**Opción B: Ejecución mediante Script (Producción)**
+
+```bash
+make script2-run VARIANT=v011
+```
+
+**Opción C: Ejecución manual en Notebook**
+
+Abre el notebook y configura la segunda celda:
+
+```python
+env_variant = "v011"  # Descomenta y asigna tu variante
+```
+
+### Paso 3: Verificación
+
+Asegúrate de que todos los archivos se han generado correctamente:
+
+```bash
 make script2-check-results VARIANT=v011
 ```
 
----
+## 3. Artefactos Generados (Salidas)
 
-Una vez completada la Fase 02 con éxito, procede a crear variantes de la Fase 03 usando `v011` (u otra variante de F02) como padre.
+Tras ejecutar la fase, todos los resultados se centralizan en la carpeta de la variante: `executions/02_prepareeventsds/<VARIANT>/`
+
+| Archivo | Contenido |
+|---------|-----------|
+| `02_prepareeventsds_dataset.parquet` | Dataset final de eventos. Contiene los instantes temporales y los IDs de los eventos detectados. Es el archivo principal para la Fase 03. |
+| `02_prepareeventsds_event_catalog.json` | Diccionario de traducción. Mapea cada `event_id` numérico con su nombre legible (ej: 102 → BATT_Power_Level_High). |
+| `02_prepareeventsds_report.html` | Informe interactivo con visualizaciones de la frecuencia de eventos, análisis de intervalos entre llegadas y estadísticas de distribución. |
+| `02_prepareeventsds_bands.json` | Registro de discretización. Detalla los umbrales específicos aplicados a cada señal para generar las bandas. |
+| `02_prepareeventsds_metadata.json` | Metadatos técnicos. Información sobre tiempos de ejecución, volumen de datos procesados y versiones del código. |
+| `params.yaml` | Configuración. Copia de los parámetros utilizados (incluyendo el `parent_variant`) para asegurar la trazabilidad. |
+| `figures/` | Gráficos. Directorio con las imágenes estáticas generadas durante el análisis. |
+

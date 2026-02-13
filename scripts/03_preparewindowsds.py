@@ -20,11 +20,15 @@ import yaml
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import Counter
+from time import perf_counter
+from bisect import bisect_left
 import re
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 import sys
 
@@ -60,7 +64,7 @@ from mlops4ofp.tools.artifacts import (
     save_numeric_dataset,
     save_params_and_metadata,
 )
-from mlops4ofp.tools.figures import save_figure
+import mlops4ofp.tools.html_reports.html03 as preparewindows_report03
 
 execution_dir = detect_execution_dir()
 PROJECT_ROOT = detect_project_root(execution_dir)
@@ -108,13 +112,20 @@ def main():
 
     variant_root = project_root / "executions" / PHASE / args.variant
 
-    assemble_run_context(
+    ctx= assemble_run_context(
         project_root=project_root,
         phase=PHASE,
         variant=args.variant,
         variant_root=variant_root,
         execution_dir=args.execution_dir,
     )
+
+    OUTPUTS = build_phase_outputs(
+        variant_root=variant_root,
+        phase=ctx["phase"],
+    )
+
+    ctx["outputs"] = OUTPUTS
 
     # -----------------------------------------------------------------
     # Params
@@ -140,6 +151,9 @@ def main():
             Tu = float(json.load(f)["Tu"])
 
     print(f"[F03] Tu = {Tu}", flush=True)
+
+    ctx['variant_params'] = params
+    ctx['variant_params']['Tu'] = Tu
 
     # -----------------------------------------------------------------
     # Load dataset
@@ -460,6 +474,19 @@ def main():
     print(f"  Dataset : {output_path}")
     print(f"  Ventanas: {windows_written:,}")
     print(f"  Tiempo  : {elapsed:,.1f}s")
+
+    # ============================================================
+    # Tablas, figuras e informe HTML (Fase 03)
+    # ============================================================
+
+    df_windows = pd.read_parquet(ctx["outputs"]["dataset"])
+
+    preparewindows_report03.generate_html_report(
+        ctx=ctx,
+        df_windows=df_windows,
+        catalog=catalog,
+    )
+
 
 
 # =====================================================================

@@ -42,7 +42,7 @@ from mlops4ofp.tools.artifacts import (
     save_numeric_dataset,
     save_params_and_metadata,
 )
-from mlops4ofp.tools.figures import save_figure
+import mlops4ofp.tools.html_reports.html01Old as explore_report
 
 execution_dir = detect_execution_dir()
 PROJECT_ROOT = detect_project_root(execution_dir)
@@ -110,121 +110,6 @@ def apply_cleaning(df: pd.DataFrame, params: dict):
     return df_clean, nan_repl
 
 
-def generate_figures_and_report(
-    *,
-    variant: str,
-    ctx: dict,
-    df_out: pd.DataFrame,
-    numeric_cols: list[str],
-    Tu_value: float,
-    raw_path: Path,
-):
-    figures_dir = ctx["figures_dir"]
-    figures_dir.mkdir(parents=True, exist_ok=True)
-    fig_paths = []
-
-    # --- Nulos ---
-    na_pct = df_out.isna().mean() * 100
-    fig1 = figures_dir / "01_nulls_pct.png"
-    save_figure(
-        fig1,
-        plot_fn=lambda: (
-            na_pct.sort_values(ascending=False).plot(kind="bar"),
-            plt.title("Porcentaje de nulos por columna"),
-            plt.ylabel("% nulos"),
-        ),
-        figsize=(12, 4),
-    )
-    fig_paths.append(("Nulos por columna", fig1))
-
-    # --- Medias ---
-    desc = df_out.describe().T
-    fig2 = figures_dir / "02_mean_per_variable.png"
-    save_figure(
-        fig2,
-        plot_fn=lambda: (
-            desc["mean"].plot(),
-            plt.title("Media por variable numérica"),
-        ),
-        figsize=(12, 4),
-    )
-    fig_paths.append(("Media por variable", fig2))
-
-    # --- Histogramas ---
-    for col in numeric_cols:
-        data = df_out[col].dropna()
-        if data.empty:
-            continue
-        bins = max(30, min(100, int(np.sqrt(len(data)))))
-        out = figures_dir / f"hist_{col}.png"
-        save_figure(
-            out,
-            plot_fn=lambda d=data, b=bins, c=col: (
-                plt.hist(d, bins=b, edgecolor="black", alpha=0.7),
-                plt.title(f"Histograma — {c}"),
-            ),
-            figsize=(8, 4),
-        )
-        fig_paths.append((f"Histograma {col}", out))
-
-    # --- Series temporales ---
-    if "segs" in df_out.columns:
-        for col in numeric_cols:
-            if col == "segs":
-                continue
-            out = figures_dir / f"time_{col}.png"
-            save_figure(
-                out,
-                plot_fn=lambda c=col: (
-                    plt.plot(df_out["segs"], df_out[c]),
-                    plt.title(f"Evolución temporal — {c}"),
-                    plt.xlabel("segs"),
-                ),
-                figsize=(12, 4),
-            )
-            fig_paths.append((f"Evolución temporal {col}", out))
-
-    # --- Correlación ---
-    if len(numeric_cols) >= 2:
-        corr = df_out[numeric_cols].corr()
-        figc = figures_dir / "correlation_matrix.png"
-        save_figure(
-            figc,
-            plot_fn=lambda: (
-                plt.imshow(corr, cmap="coolwarm", interpolation="nearest"),
-                plt.colorbar(),
-                plt.title("Matriz de correlación"),
-                plt.xticks(range(len(numeric_cols)), numeric_cols, rotation=90),
-                plt.yticks(range(len(numeric_cols)), numeric_cols),
-            ),
-            figsize=(10, 8),
-        )
-        fig_paths.append(("Matriz de correlación", figc))
-
-    # --- HTML ---
-    report_path = ctx["outputs"]["report"]
-    sections = [
-        f"<h1>Exploration Report — Variante {variant}</h1>",
-        f"<p><b>Archivo RAW:</b> {raw_path}</p>",
-        f"<p><b>Filas:</b> {len(df_out):,}</p>",
-        f"<p><b>Columnas numéricas:</b> {df_out.shape[1]}</p>",
-        f"<p><b>Tu:</b> {Tu_value}</p>",
-        "<hr>",
-        "<h2>Nulos por columna (%)</h2>",
-        na_pct.to_frame("pct_nulls").to_html(),
-        "<h2>Estadísticos básicos</h2>",
-        desc.to_html(),
-        "<hr>",
-        "<h2>Figuras</h2>",
-    ]
-
-    for title, path in fig_paths:
-        sections.append(f"<h3>{title}</h3><img src='figures/{path.name}' width='900'>")
-
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("<html><body>" + "\n".join(sections) + "</body></html>")
-
-
 # ============================================================
 # MAIN
 # ============================================================
@@ -261,6 +146,8 @@ def main():
         params = yaml.safe_load(f) or {}
 
     validate_params(PHASE, params, project_root)
+    ctx["variant_params"] = params
+
 
     # RAW (ruta en params.yaml relativa a project_root)
     raw_input = (project_root / params["raw_dataset_path"]).expanduser().resolve()
@@ -318,13 +205,12 @@ def main():
         git_commit=get_git_hash(),
     )
 
-    generate_figures_and_report(
+    explore_report.generate_figures_and_report(
         variant=variant,
         ctx=ctx,
         df_out=df_out,
         numeric_cols=[c for c in numeric_cols if c != "segs"],
         Tu_value=Tu_value,
-        raw_path=raw_copy,
     )
 
     print(f"\n===== FASE {PHASE} COMPLETADA =====")
