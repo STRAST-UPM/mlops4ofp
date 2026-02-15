@@ -20,6 +20,7 @@ F06 no construye replay ni selecciona modelos manualmente.
 
 - Componer un sistema a partir de variantes F05.
 - Incorporar el modelo oficial de cada F05.
+- Propagar el nombre funcional del objetivo (`prediction_name`) asociado a cada modelo.
 - Incorporar los datasets etiquetados de F04.
 - Validar coherencia temporal común.
 - Generar un paquete sellado y reproducible.
@@ -95,6 +96,8 @@ En executions/06_packaging/<VARIANT>/:
 
 - models/ (obligatorio)
   Copia física del modelo oficial de cada F05.
+  Cada modelo incluye explícitamente su `prediction_name`,
+  que será el identificador funcional usado en F07.
 
 - datasets/ (obligatorio)
   Copia del dataset etiquetado de cada F04 asociado.
@@ -108,6 +111,10 @@ En executions/06_packaging/<VARIANT>/:
     - régimen temporal
     - modelos incluidos
     - datasets incluidos
+  Y por cada modelo:
+    - source_f05
+    - model_id
+    - prediction_name
 
 - params.yaml
   Parámetros efectivos de la variante.

@@ -20,14 +20,6 @@ $(info [INFO] Usando intérprete Python: $(PYTHON))
 # CARGA AUTOMÁTICA DE VARIABLES DE ENTORNO
 ############################################
 
-ifneq ("$(wildcard .mlops4ofp/env.sh)","")
-include .mlops4ofp/env.sh
-export
-endif
-
-$(info [INFO] Usando intérprete Python: $(PYTHON))
-
-
 # Si existe .mlops4ofp/env.sh, se incluye automáticamente
 # y sus variables pasan a todos los comandos make.
 #
@@ -80,14 +72,52 @@ endif
 
 check-setup:
 	@echo "==> Verificando entorno base"
-	@$(PYTHON) setup/check_env.py
+	@.venv/bin/python setup/check_env.py
 	@echo "==> Verificando configuración del proyecto"
 	@.venv/bin/python setup/check_setup.py
 
 clean-setup:
-	@echo "==> Eliminando entorno completo de setup"
-	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv
-	@echo "[OK] Entorno eliminado. Proyecto vuelve a estado post-clone."
+	@echo "==> Eliminando MLflow asociado al proyecto (si existe)"
+	@$(PYTHON) - <<'EOF'
+import yaml, pathlib, subprocess, os, shutil, json, sys
+
+cfg_path = pathlib.Path(".mlops4ofp/setup.yaml")
+if not cfg_path.exists():
+    sys.exit(0)
+
+cfg = yaml.safe_load(cfg_path.read_text())
+ml = cfg.get("mlflow", {})
+
+if not ml.get("enabled", False):
+    sys.exit(0)
+
+uri = ml.get("tracking_uri", "")
+
+if uri.startswith("file:"):
+    path = uri.replace("file:", "")
+    if os.path.exists(path):
+        print(f"[INFO] Eliminando MLflow local en {path}")
+        shutil.rmtree(path)
+else:
+    print("[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)")
+    try:
+        out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
+        experiments = json.loads(out)
+        for exp in experiments:
+            name = exp.get("name", "")
+            exp_id = exp.get("experiment_id")
+            if name.startswith("F05_") and exp_id:
+                print(f"[INFO] Eliminando experimento remoto {name}")
+                subprocess.run(
+                    ["mlflow", "experiments", "delete", "--experiment-id", exp_id],
+                    check=False
+                )
+    except Exception as e:
+        print("[WARN] No se pudo limpiar MLflow remoto:", e)
+EOF
+	@echo "==> Eliminando entorno completo del proyecto ML"
+	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv executions
+	@echo "[OK] Proyecto ML reinicializado. Ejecuta 'make setup' para reconstruir estructura base."
 
 
 
@@ -138,61 +168,96 @@ variant-generic: check-variant-format
 publish-generic: check-variant-format
 	@echo "==> Validando variante $(PHASE):$(VARIANT)"
 	$(PYTHON) mlops4ofp/tools/traceability.py validate-variant --phase $(PHASE) --variant $(VARIANT)
+
 	@echo "==> Registrando artefactos DVC"
 	@for ext in $(PUBLISH_EXTS); do \
-	  dvc add $(VARIANTS_DIR)/$(VARIANT)/*.$$ext || true; \
+	  $(DVC) add $(VARIANTS_DIR)/$(VARIANT)/*.$$ext 2>/dev/null || true; \
 	done
-	@git add -f $(VARIANTS_DIR)/$(VARIANT)/*.dvc || true
-	@git add $(VARIANTS_DIR)/variants.yaml || true
+
+	@echo "==> Añadiendo a Git solo la variante publicada"
+	@git add $(VARIANTS_DIR)/$(VARIANT) 2>/dev/null || true
+	@git add $(VARIANTS_DIR)/$(VARIANT)/*.dvc 2>/dev/null || true
+	@git add $(VARIANTS_DIR)/variants.yaml 2>/dev/null || true
+	@git add dvc.yaml dvc.lock 2>/dev/null || true
+
 	@git commit -m "publish variant: $(PHASE) $(VARIANT)" || true
+
 	# Comprobaciones previas: remoto DVC 'storage' debe existir
 	@if ! $(DVC) remote list 2>/dev/null | grep -q "^storage"; then \
 		echo "[ERROR] Remote DVC 'storage' no configurado. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
 	fi
-	# Si existe remote git 'publish' lo usamos; si no existe pero el setup está en
-	# modo git.mode=none (local), permitimos commit local y dvc push.
-	# Determinamos el modo mediante script Python (usa .venv)
-	@MODE=$$($(PYTHON) scripts/check_publish_mode.py); \
-	if [ "$$MODE" = "publish" ]; then \
+
+	# Determinamos modo publish
+	@MODE=$$($(PYTHON) - <<'EOF'
+import yaml, pathlib
+cfg = pathlib.Path(".mlops4ofp/setup.yaml")
+if not cfg.exists():
+    print("error")
+else:
+    data = yaml.safe_load(cfg.read_text())
+    print(data.get("git", {}).get("mode", "none"))
+EOF
+); \
+
+	if [ "$$MODE" = "custom" ]; then \
 		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
-		echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
+		echo "[INFO] Setup en modo git.mode=none: commit local únicamente"; \
 	else \
-		echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
+		echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'."; exit 1; \
 	fi
-	# Finalmente, push DVC al remote 'storage' (puede ser local o remoto)
-	@$(DVC) push -r storage || (echo "[WARN] dvc push failed (credenciales o acceso)"; exit 1)
+
+	@echo "==> Push DVC"
+	@$(DVC) push -r storage || (echo "[ERROR] dvc push failed"; exit 1)
+
 	@echo "[OK] Publicación completada: variante $(PHASE):$(VARIANT)"
 
 remove-generic: check-variant-format
 	@echo "==> Comprobando si la variante $(PHASE):$(VARIANT) tiene hijos…"
 	$(PYTHON) mlops4ofp/tools/traceability.py can-delete --phase $(PHASE) --variant $(VARIANT)
+
+	@echo "==> Eliminando artefactos DVC asociados (si existen)"
+	@for f in $(VARIANTS_DIR)/$(VARIANT)/*.dvc; do \
+		if [ -f "$$f" ]; then \
+			$(DVC) remove "$$f" || true; \
+		fi; \
+	done
+
 	@echo "==> Eliminando carpeta completa de la variante"
-	rm -rf $(VARIANTS_DIR)/$(VARIANT)
+	@rm -rf $(VARIANTS_DIR)/$(VARIANT)
+
 	@echo "==> Actualizando registro de variantes"
 	$(PYTHON) mlops4ofp/tools/params_manager.py delete-variant --phase $(PHASE) --variant $(VARIANT)
-	@echo "==> Commit + push"
-	@git add -A
+
+	@echo "==> Añadiendo a Git solo cambios relevantes"
+	@git add $(VARIANTS_DIR) 2>/dev/null || true
+	@git add dvc.yaml dvc.lock 2>/dev/null || true
+
 	@git commit -m "remove variant: $(PHASE) $(VARIANT)" || true
-	# Si existe remote publish empujamos; si setup git.mode=none permitimos omitir
-	@MODE=$$($(PYTHON) scripts/check_publish_mode.py); \
-	if [ "$$MODE" = "publish" ]; then \
+
+	@MODE=$$($(PYTHON) - <<'EOF'
+import yaml, pathlib
+cfg = pathlib.Path(".mlops4ofp/setup.yaml")
+if not cfg.exists():
+    print("error")
+else:
+    data = yaml.safe_load(cfg.read_text())
+    print(data.get("git", {}).get("mode", "none"))
+EOF
+); \
+	if [ "$$MODE" = "custom" ]; then \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
-		echo "[INFO] Setup en modo git.mode=none: no se empuja a Git remoto (commit local solo)"; \
+		echo "[INFO] Setup en modo git.mode=none: commit local únicamente"; \
 	else \
-		echo "[ERROR] Remote 'publish' no configurado y setup no en modo 'none'. Ejecuta 'make setup' o contacta con el admin"; exit 1; \
+		echo "[ERROR] Setup inválido o no configurado."; exit 1; \
 	fi
-	@echo "[OK] Variante $(PHASE):$(VARIANT) eliminada completamente."
 
-check-dvc-generic:
-	@echo "===== CHECKING DVC STATUS ($(PHASE)) ====="
-	@echo "[Checking local DVC...]"
-	@$(DVC) status --cloud 2>/dev/null && echo "[OK] Local DVC clean" || echo "[WARN] Local DVC has changes"
-	@echo "[Checking remote DVC (storage)...]"
-	@$(DVC) status -r storage -c 2>/dev/null && echo "[OK] Remote up to date" || echo "[WARN] Remote missing data"
-	@echo "================================"
+	@echo "==> Push DVC para propagar eliminación"
+	@$(DVC) push -r storage || echo "[WARN] dvc push failed"
+
+	@echo "[OK] Variante $(PHASE):$(VARIANT) eliminada completamente."
 
 check-results-generic: check-variant-format
 	@test -n "$(PHASE)" || (echo "[ERROR] PHASE no definido"; exit 1)
@@ -211,13 +276,6 @@ check-results-generic: check-variant-format
 	done; \
 	echo "================================"; \
 	if [ $$MISSING -eq 1 ]; then echo "[ERROR] Some files missing"; exit 1; fi
-
-clean-phase-generic:
-	@echo "==> Limpiando variantes de Fase $(PHASE)"
-	rm -rf $(VARIANTS_DIR)/v*
-	@echo "==> Eliminando registro de variantes de Fase $(PHASE)"
-	rm -f $(VARIANTS_DIR)/variants.yaml
-	@echo "[OK] Limpieza completa de Fase $(PHASE) (solo parámetros y variantes)"
 
 export-generic: check-variant-format
 	@test -n "$(PHASE)" || (echo "[ERROR] PHASE no definido"; exit 1)
@@ -321,6 +379,8 @@ variant1: check-variant-format
 	@$(if $(strip $(CLEANING_STRATEGY)),$(eval SET_LIST += --set cleaning_strategy='$(CLEANING_STRATEGY)'))
 	@$(if $(strip $(NAN_VALUES)),$(eval SET_LIST += --set nan_values='$(NAN_VALUES)'))
 	@$(if $(strip $(ERROR_VALUES)),$(eval SET_LIST += --set error_values_by_column='$(ERROR_VALUES)'))
+	@$(if $(strip $(MAX_LINES)),$(eval SET_LIST += --set max_lines='$(MAX_LINES)'))
+	@$(if $(strip $(FIRST_LINE)),$(eval SET_LIST += --set first_line='$(FIRST_LINE)'))
 	@$(MAKE) variant-generic PHASE=$(PHASE1) VARIANT=$(VARIANT) RAW=$(RAW) EXTRA_SET_FLAGS="$(SET_LIST)"
 
 ############################################
@@ -367,19 +427,10 @@ script1-check-results: check-variant-format
 
 
 
-############################################
-# 8. CHEQUEO DE DVC
-############################################
-script1-check-dvc:
-	$(MAKE) check-dvc-generic PHASE=$(PHASE1)
-
 
 ############################################
 # 9. LIMPIEZA TOTAL DE FASE 01
 ############################################
-clean1-all:
-	$(MAKE) clean-phase-generic PHASE=$(PHASE1) VARIANTS_DIR=$(VARIANTS_DIR_01)
-
 remove1-all:
 	$(MAKE) remove-phase-all PHASE=$(PHASE1) VARIANTS_DIR=$(VARIANTS_DIR_01)
 
@@ -408,7 +459,8 @@ help1:
 	@echo ""
 	@echo " CREAR VARIANTE:"
 	@echo "   make variant1 VARIANT=v001 RAW=./data/raw.csv \\"
-	@echo "       [CLEANING_STRATEGY=basic] [NAN_VALUES='[-999999]'] [ERROR_VALUES='{}']"
+	@echo "       [CLEANING_STRATEGY=basic] [NAN_VALUES='[-999999]'] [ERROR_VALUES='{}'] \\"
+	@echo "       [MAX_LINES=10000] [FIRST_LINE=1]"
 	@echo ""
 	@echo " EJECUTAR NOTEBOOK:"
 	@echo "   make nb1-run VARIANT=v001"
@@ -418,7 +470,6 @@ help1:
 	@echo ""
 	@echo " CHEQUEOS:"
 	@echo "   make script1-check-results VARIANT=v001   # Verifica artefactos generados"
-	@echo "   make script1-check-dvc                      # Chequea estado de DVC"
 	@echo ""
 	@echo " PUBLICAR + REPRODUCIR:"
 	@echo "   make publish1 VARIANT=v001                  # Publica en DVC + git"
@@ -426,7 +477,6 @@ help1:
 	@echo ""
 	@echo " LIMPIAR + ELIMINAR:"
 	@echo "   make remove1 VARIANT=v001                   # Elimina variante (si no tiene hijos)"
-	@echo "   make clean1-all                             # Limpia todas las variantes de F01"
 	@echo ""
 	@echo " TAGGING:"
 	@echo "   make tag1-stage-ready / tag1-script-ready / tag1-stable"
@@ -491,12 +541,6 @@ script2-check-results: check-variant-format
 		02_prepareeventsds_bands.json 02_prepareeventsds_event_catalog.json \
 		02_prepareeventsds_metadata.json 02_prepareeventsds_report.html"
 
-script2-check-dvc:
-	$(MAKE) check-dvc-generic PHASE=$(PHASE2)
-
-clean2-all:
-	$(MAKE) clean-phase-generic PHASE=$(PHASE2) VARIANTS_DIR=$(VARIANTS_DIR_02)
-
 remove2-all:
 	$(MAKE) remove-phase-all PHASE=$(PHASE2) VARIANTS_DIR=$(VARIANTS_DIR_02)
 
@@ -541,7 +585,6 @@ help2:
 	@echo ""
 	@echo " CHEQUEOS:"
 	@echo "   make script2-check-results VARIANT=v011   # Verifica artefactos generados"
-	@echo "   make script2-check-dvc                     # Chequea estado de DVC"
 	@echo ""
 	@echo " PUBLICAR + REPRODUCIR:"
 	@echo "   make publish2 VARIANT=v011                 # Publica en DVC + git"
@@ -549,7 +592,6 @@ help2:
 	@echo ""
 	@echo " LIMPIAR + ELIMINAR:"
 	@echo "   make remove2 VARIANT=v011                  # Elimina variante (si no tiene hijos)"
-	@echo "   make clean2-all                            # Limpia todas las variantes de F02"
 	@echo ""
 	@echo " TAGGING:"
 	@echo "   make tag2-stage-ready / tag2-script-ready / tag2-stable"
@@ -632,18 +674,6 @@ script3-check-results: check-variant-format
 		03_preparewindowsds_metadata.json 03_preparewindowsds_report.html "
 
 
-############################################
-# 7. CHEQUEO DE DVC PARA FASE 03
-############################################
-script3-check-dvc:
-	$(MAKE) check-dvc-generic PHASE=$(PHASE3)
-
-
-############################################
-# 8. LIMPIEZA DE FASE 03
-############################################
-clean3-all:
-	$(MAKE) clean-phase-generic PHASE=$(PHASE3) VARIANTS_DIR=$(VARIANTS_DIR_03)
 
 ############################################
 # export
@@ -687,7 +717,6 @@ help3:
 	@echo ""
 	@echo " CHEQUEOS:"
 	@echo "   make script3-check-results VARIANT=v111   # Verifica artefactos generados"
-	@echo "   make script3-check-dvc                    # Chequea estado de DVC"
 	@echo ""
 	@echo " EXPORTAR:"
 	@echo "   make export3 VARIANT=v111 PARENT=v011     # Exporta dataset + metadata"
@@ -698,7 +727,6 @@ help3:
 	@echo ""
 	@echo " LIMPIAR + ELIMINAR:"
 	@echo "   make remove3 VARIANT=v111                 # Elimina variante (si no tiene hijos)"
-	@echo "   make clean3-all                           # Limpia todas las variantes de F03"
 	@echo ""
 	@echo " TAGGING:"
 	@echo "   make tag3-stage-ready / tag3-script-ready / tag3-stable"
@@ -738,11 +766,13 @@ script4-run: check-variant-format
 
 variant4: check-variant-format
 	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN (variante de F03)"; exit 1)
+	@test -n "$(PREDICTION_NAME)" || (echo "[ERROR] Debes especificar PREDICTION_NAME=name"; exit 1)
 	@test -n "$(OBJECTIVE)" || (echo "[ERROR] Debes especificar OBJECTIVE='{operator: OR, events: [...]}'"; exit 1)
 	@echo "==> Preparando parámetros específicos para Fase 04 (Target Engineering)"
 	@$(eval SET_LIST := \
 		--set parent_variant=$(PARENT) \
-		--set prediction_objective='$(OBJECTIVE)' )
+		--set prediction_objective='$(OBJECTIVE)' \
+		--set prediction_name='$(PREDICTION_NAME)')
 	@$(MAKE) variant-generic PHASE=$(PHASE4) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
 	@echo "[OK] Variante $(VARIANT) creada para Fase 04."
 
@@ -774,18 +804,10 @@ script4-check-results: check-variant-format
 		04_targetengineering_report.html"
 
 
-############################################
-# 7. CHEQUEO DE DVC PARA FASE 04
-############################################
-script4-check-dvc:
-	$(MAKE) check-dvc-generic PHASE=$(PHASE4)
-
 
 ############################################
 # 8. LIMPIEZA DE FASE 04
 ############################################
-clean4-all:
-	$(MAKE) clean-phase-generic PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04)
 
 remove4-all:
 	$(MAKE) remove-phase-all PHASE=$(PHASE4) VARIANTS_DIR=$(VARIANTS_DIR_04)
@@ -821,14 +843,12 @@ help4:
 	@echo ""
 	@echo " CHEQUEOS:"
 	@echo "   make script4-check-results VARIANT=v201"
-	@echo "   make script4-check-dvc"
 	@echo ""
 	@echo " PUBLICAR:"
 	@echo "   make publish4 VARIANT=v201"
 	@echo ""
 	@echo " LIMPIAR / ELIMINAR:"
 	@echo "   make remove4 VARIANT=v201"
-	@echo "   make clean4-all"
 	@echo ""
 	@echo " ADVISE (RECOMENDACIÓN DE MODELADO):"
 	@echo "   make advise4 VARIANT=vNNN OPENAI_API_KEY=tu_api_key"
@@ -1000,54 +1020,118 @@ endif
 # 4. PUBLICAR + MARCAR COMO PUBLISHED
 ############################################
 publish5: check-variant-format
-	@if [ -z "$$RUN_ID" ] || [ "$$RUN_ID" = "null" ]; then \
-  		echo "[ERROR] No existe run MLflow registrado. Ejecuta script5-run o nb5-run primero."; \
-  		exit 1; \
-	fi
-	@echo "==> Validando variante $(PHASE5):$(VARIANT)"
-	@test -f $(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json || \
-	  (echo "[ERROR] Falta metadata"; exit 1)
-
 	@META=$(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json; \
-	RUN_ID=$$($(PYTHON) -c "import json; p='$$META'; d=json.load(open(p)); print(d.get('mlflow',{}).get('run_id',''))"); \
-	if [ -n "$$RUN_ID" ] && [ "$$RUN_ID" != "null" ]; then \
-	  mlflow runs set-tag --run-id $$RUN_ID published true; \
-	  $(PYTHON) -c "import json; p='$$META'; d=json.load(open(p)); d.setdefault('mlflow',{}); d['mlflow']['published']=True; json.dump(d, open(p,'w'), indent=2)"; \
-	  echo "[OK] Run marcado como published=true"; \
-	fi
+	if [ ! -f $$META ]; then \
+		echo "[ERROR] Falta metadata 05_modeling_metadata.json"; exit 1; \
+	fi; \
+	echo "==> Registrando run en MLflow"; \
+	$(PYTHON) - <<EOF \
+import json, subprocess, os, sys
+
+meta_path = "$$META"
+with open(meta_path) as f:
+    data = json.load(f)
+
+reg = data.get("mlflow_registration")
+if not reg:
+    print("[ERROR] No existe bloque mlflow_registration en metadata")
+    sys.exit(1)
+
+exp_name = reg["experiment_name"]
+metrics = reg.get("metrics", {})
+params = reg.get("params", {})
+artifacts = reg.get("artifacts", [])
+
+# Crear experimento si no existe
+subprocess.run(["mlflow", "experiments", "create", "--experiment-name", exp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Obtener experiment_id
+out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
+import json as _json
+exps = _json.loads(out)
+exp_id = next((e["experiment_id"] for e in exps if e["name"] == exp_name), None)
+
+if not exp_id:
+    print("[ERROR] No se pudo obtener experiment_id")
+    sys.exit(1)
+
+# Crear run
+out = subprocess.check_output(["mlflow", "runs", "create", "--experiment-id", exp_id, "--format", "json"])
+run = _json.loads(out)
+run_id = run["info"]["run_id"]
+
+# Log params
+for k, v in params.items():
+    subprocess.run(["mlflow", "runs", "log-param", "--run-id", run_id, "--key", str(k), "--value", str(v)])
+
+# Log metrics
+for k, v in metrics.items():
+    subprocess.run(["mlflow", "runs", "log-metric", "--run-id", run_id, "--key", str(k), "--value", str(v)])
+
+# Log artifacts
+for a in artifacts:
+    if os.path.exists(a):
+        subprocess.run(["mlflow", "runs", "log-artifact", "--run-id", run_id, "--local-path", a])
+
+# Guardar run_id en metadata
+data["mlflow"] = {
+    "run_id": run_id,
+    "experiment_id": exp_id,
+    "experiment_name": exp_name
+}
+
+with open(meta_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+print(f"[OK] Run MLflow creado: {run_id}")
+EOF
 
 	$(MAKE) publish-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) \
 		PUBLISH_EXTS="parquet json html h5" VARIANT=$(VARIANT)
 
 
 ############################################
-# 5. ELIMINAR VARIANTE FASE 05 + BORRAR RUN MLFLOW
-############################################
-############################################
 # 5. ELIMINAR VARIANTE FASE 05 + LIMPIEZA MLFLOW COMPLETA
 ############################################
 remove5: check-variant-format
 	@META=$(VARIANTS_DIR_05)/$(VARIANT)/$(PHASE5)_metadata.json; \
 	if [ -f $$META ]; then \
-	  RUN_ID=$$($(PYTHON) -c "import json; d=json.load(open('$$META')); print(d.get('mlflow',{}).get('run_id',''))"); \
-	  PARENT=$$($(PYTHON) -c "import json; d=json.load(open('$$META')); print(d.get('parent_variant',''))"); \
-	  if [ -n "$$RUN_ID" ] && [ "$$RUN_ID" != "null" ]; then \
-	    echo "==> Eliminando run MLflow $$RUN_ID"; \
-	    mlflow runs delete --run-id $$RUN_ID || true; \
-	  fi; \
-	  EXP_NAME="F05_$$PARENT"; \
-	  EXP_ID=$$(mlflow experiments list --format json | \
-	    $(PYTHON) -c "import sys,json,os; exp_name=os.environ.get('EXP_NAME'); data=json.load(sys.stdin); print(next((e['experiment_id'] for e in data if e['name']==exp_name), ''))" \
-	  ); \
-	  if [ -n "$$EXP_ID" ]; then \
-	    COUNT=$$(mlflow runs list --experiment-id $$EXP_ID --format json | \
-	      $(PYTHON) -c "import sys,json; runs=json.load(sys.stdin); active=[r for r in runs if r['info']['lifecycle_stage']=='active']; print(len(active))" \
-	    ); \
-	    if [ "$$COUNT" = "0" ]; then \
-	      echo "==> Eliminando experimento MLflow $$EXP_NAME (vacío)"; \
-	      mlflow experiments delete --experiment-id $$EXP_ID || true; \
-	    fi; \
-	  fi; \
+		echo "==> Revisando metadata MLflow"; \
+		$(PYTHON) - <<EOF \
+import json, subprocess, sys
+
+meta_path = "$$META"
+
+with open(meta_path) as f:
+    data = json.load(f)
+
+ml = data.get("mlflow", {})
+run_id = ml.get("run_id")
+exp_id = ml.get("experiment_id")
+
+# 1️⃣ Borrar run si existe
+if run_id:
+    print(f"[INFO] Eliminando run MLflow {run_id}")
+    subprocess.run(["mlflow", "runs", "delete", "--run-id", run_id], check=False)
+
+# 2️⃣ Si hay experiment_id, comprobar si quedan runs activos
+if exp_id:
+    try:
+        out = subprocess.check_output(
+            ["mlflow", "runs", "list", "--experiment-id", exp_id, "--format", "json"]
+        )
+        runs = json.loads(out)
+        active = [r for r in runs if r["info"]["lifecycle_stage"] == "active"]
+
+        if len(active) == 0:
+            print(f"[INFO] Eliminando experimento MLflow {exp_id} (vacío)")
+            subprocess.run(
+                ["mlflow", "experiments", "delete", "--experiment-id", exp_id],
+                check=False
+            )
+    except Exception as e:
+        print("[WARN] No se pudo verificar experimento MLflow:", e)
+EOF
 	fi
 
 	$(MAKE) remove-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) VARIANT=$(VARIANT)
@@ -1079,18 +1163,8 @@ script5-check-results: check-variant-format
 	@echo "[OK] Metadata de Fase 05 presente"
 
 
-############################################
-# 7. CHEQUEO DE DVC PARA FASE 05
-############################################
-script5-check-dvc:
-	$(MAKE) check-dvc-generic PHASE=$(PHASE5)
 
 
-############################################
-# 8. LIMPIEZA DE FASE 05
-############################################
-clean5-all:
-	$(MAKE) clean-phase-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05)
 
 
 ############################################
@@ -1128,14 +1202,12 @@ help5:
 	@echo ""
 	@echo " CHEQUEOS:"
 	@echo "   make script5-check-results VARIANT=v301"
-	@echo "   make script5-check-dvc"
 	@echo ""
 	@echo " PUBLICAR:"
 	@echo "   make publish5 VARIANT=v301"
 	@echo ""
 	@echo " ELIMINAR:"
 	@echo "   make remove5 VARIANT=v301"
-	@echo "   make clean5-all"
 	@echo ""
 	@echo " COMPORTAMIENTO:"
 	@echo " - Cada variante explora UNA familia de modelos."
@@ -1259,9 +1331,6 @@ remove6: check-variant-format
 # ------------------------------------------------------------
 # Limpiar artefactos locales
 # ------------------------------------------------------------
-clean6:
-	rm -rf $(VARIANTS_DIR_06)/*/figures
-	rm -f $(PHASE6)_*.tar.gz
 
 # ------------------------------------------------------------
 # Ayuda
@@ -1311,14 +1380,99 @@ help6:
 	@echo "  make publish6 VARIANT=vNNN"
 	@echo "  make export6 VARIANT=vNNN"
 	@echo "  make remove6 VARIANT=vNNN"
-	@echo "  make clean6"
+
+
+
+# ==========================================
+# FASE 07 — DEPLOY & RUN
+# ==========================================
+PHASE7 := 07_deployrun
+VARIANTS_DIR_07 := executions/$(PHASE7)
+BASE_PARAMS_07 := $(VARIANTS_DIR_07)/base_params.yaml
+SCRIPT_07 := scripts/07_deployrun.py
+NOTEBOOK_07 := notebooks/07_deployrun.ipynb
+
+variant7: check-variant-format
+ifndef PARENT
+	$(error Debes especificar PARENT=vNNN (variante F06))
+endif
+	@echo "==> Creando variante F07: $(VARIANT) (parent F06: $(PARENT))"
+
+	$(PYTHON) mlops4ofp/tools/params_manager.py create-variant \
+		--phase $(PHASE7) \
+		--variant $(VARIANT) \
+		--base $(BASE_PARAMS_07)
+
+	@echo "==> Estableciendo parent_variant_f06 en params.yaml"
+	$(PYTHON) mlops4ofp/tools/params_manager.py set-param \
+		--phase $(PHASE7) \
+		--variant $(VARIANT) \
+		--key parent_variant_f06 \
+		--value $(PARENT)
+
+	@echo "==> Generando manifest.json"
+	$(PYTHON) notebooks/07_deployrun.ipynb --mode prepare
+
+
+script7-run: check-variant-format
+	@echo "==> Ejecutando F07 (script) para variante $(VARIANT)"
+	$(PYTHON) $(SCRIPT_07) \
+		--variant $(VARIANT) \
+		--mode run
+
+nb7-run: check-variant-format
+	@echo "==> Ejecutando F07 (notebook) para variante $(VARIANT)"
+	jupyter nbconvert \
+		--execute $(NOTEBOOK_07) \
+		--to notebook \
+		--output $(NOTEBOOK_07) \
+		--ExecutePreprocessor.timeout=-1 \
+		--ExecutePreprocessor.kernel_name=python3 \
+		--ExecutePreprocessor.extra_arguments="--variant=$(VARIANT)"
+
+publish7: check-variant-format
+	@echo "==> Publicando F07 $(VARIANT)"
+	dvc add $(VARIANTS_DIR_07)/$(VARIANT) || true
+	git add $(VARIANTS_DIR_07)/$(VARIANT) $(VARIANTS_DIR_07)/variants.yaml
+	git commit -m "F07 deploy-run: $(VARIANT)" || true
+	dvc push || true
+	git push || true
+
+# ------------------------------------------------------------
+# Eliminar variante
+# ------------------------------------------------------------
+remove7: check-variant-format
+	@echo "==> Comprobando si la variante $(PHASE7):$(VARIANT) tiene hijos…"
+	$(PYTHON) mlops4ofp/tools/traceability.py can-delete \
+		--phase $(PHASE7) \
+		--variant $(VARIANT)
+
+	@echo "==> Eliminando carpeta completa de la variante"
+	rm -rf $(VARIANTS_DIR_07)/$(VARIANT)
+
+	@echo "==> Actualizando registro de variantes"
+	$(PYTHON) mlops4ofp/tools/params_manager.py delete-variant \
+		--phase $(PHASE7) \
+		--variant $(VARIANT)
+
+	@git add -A
+	@git commit -m "remove variant: $(PHASE7) $(VARIANT)" || true
+	@git push || true
 
 
 
 
-
-
-
+help7:
+	@echo "=============================================="
+	@echo " FASE 07 — DEPLOY & RUNTIME VALIDATION"
+	@echo "=============================================="
+	@echo ""
+	@echo "make variant7 VARIANT=vNNN PARENT=vMMM    -> crear variante F07"
+	@echo "make script7-run VARIANT=vNNN  -> ejecutar cliente-servidor y métricas"
+	@echo "make nb7-run VARIANT=vNNN      -> ejecutar notebook equivalente"
+	@echo "make publish7 VARIANT=vNNN     -> versionar con DVC + Git"
+	@echo "make remove7 VARIANT=vNNN      -> eliminar variante si no tiene hijos"
+	@echo ""
 
 
 
@@ -1380,18 +1534,6 @@ print(cfg['dvc']['repo'])"); \
 
 
 
-
-
-
-clean-all-all:
-	@echo "==> Limpiando todas las fases"
-	$(MAKE) clean5-all
-	$(MAKE) clean4-all
-	$(MAKE) clean3-all
-	$(MAKE) clean2-all
-	$(MAKE) clean1-all
-	@echo "[OK] Limpieza completa de todas las fases (solo parámetros y variantes)"
-
 help:
 	@echo "==============================================="
 	@echo " MLOps4OFP — Pipeline en 4 Fases"
@@ -1408,21 +1550,19 @@ help:
 	@echo ""
 	@echo " MANTENIMIENTO:"
 	@echo "   make help-setup          # Setup inicial del proyecto"
-	@echo "   make clean-all-all       # Limpia todas las fases"
 	@echo ""
 	@echo "==============================================="
 
 .PHONY: \
 	setup check-setup clean-setup help-setup \
-	nb-run-generic script-run-generic publish-generic remove-generic check-dvc-generic check-results-generic clean-phase-generic export-generic \
+	nb-run-generic script-run-generic publish-generic remove-generic check-results-generic export-generic \
 	nb1-run nb2-run nb3-run nb4-run \
-	script1-run script1-repro script1-check-results script1-check-dvc script2-run script2-repro script2-check-results script2-check-dvc script3-run script3-repro script3-check-results script3-check-dvc \
+	script1-run script1-repro script1-check-results script2-run script2-repro script2-check-results script3-run script3-repro script3-check-results  \
 	script4-run \
 	variant1 variant2 variant3 variant4 variant-generic check-variant-format \
 	publish1 publish2 publish3 publish4\
 	remove1 remove2 remove3 remove4 \
 	export3 \
-	clean1-all clean2-all clean3-all clean4-all clean-all-all \
 	tag1-stage-ready tag1-script-ready tag1-stable tag2-stage-ready tag2-script-ready tag2-stable tag3-stage-ready tag3-script-ready tag3-stable \
 	help1 help2 help3 help4 help \
 	advise4 \

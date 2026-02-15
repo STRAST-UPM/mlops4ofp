@@ -101,12 +101,14 @@ En `executions/04_targetengineering/<VARIANT>/` normalmente encontrarás:
 ### Crear variante
 ```bash
 make variant4 VARIANT=v201 PARENT=v111 \
+  PREDICTION_NAME=name \
   OBJECTIVE="{operator: OR, events: [GRID_OVERVOLTAGE, INVERTER_FAULT]}"
 ```
 
 Parámetros:
 - `VARIANT`: identificador `vNNN` (obligatorio).
 - `PARENT`: variante padre de Fase 03 (obligatorio).
+- `PREDICTION_NAME`: nombre legible del predictor. Debe ser estable y único en el proyecto.
 - `OBJECTIVE`: definición inline del objetivo (YAML/JSON compacto).
 
 ---
@@ -161,6 +163,7 @@ make clean4-all
 1. Crear variante:
    ```bash
    make variant4 VARIANT=v201 PARENT=v111 \
+     PREDICTION_NAME=NOMBRE \
      OBJECTIVE="{operator: OR, events: [...]}"
    ```
 2. Ejecutar notebook (opcional):

@@ -13,6 +13,7 @@ El notebook y la script de esta fase realizan tareas conceptualmente equivalente
 - Evaluar modelos con métricas alineadas con el problema (recall prioritario).
 - Seleccionar automáticamente un único modelo final por variante.
 - Registrar artefactos, métricas y decisiones para trazabilidad completa.
+- El nombre legible del modelo se hereda automáticamente desde la variante de la Fase 04 (prediction_name), garantizando coherencia semántica entre objetivo y modelo.
 - Preparar modelos **edge‑ready** para fases posteriores (exportación / inferencia).
 
 ---
@@ -152,8 +153,9 @@ En `executions/05_modeling/<VARIANT>/`:
 
 - `05_modeling_params.json` o `params.yaml`
   - Parámetros efectivos usados.
-- `model_final.h5`
+- `<prediction_name>_model.h5`
   Modelo único seleccionado automáticamente.
+  El nombre legible proviene de la Fase 04.
 - `05_modeling_metadata.json`
   Incluye:
     - best_val_recall
@@ -172,8 +174,8 @@ La presencia de `05_modeling_metadata.json` es **condición necesaria para publi
 
 Cada variante F05 se registra automáticamente en MLflow.
 
-- Experimento: F05_<parent_variant>
-- Run: nombre = <VARIANT>
+- Experimento: F05_<prediction_name>
+- Run: nombre = <prediction_name>__<VARIANT>
 - Re-ejecución: reemplaza el run anterior
 - publish5: marca el run como published=true
 - remove5: elimina el run y el experimento si queda vacío

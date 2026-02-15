@@ -225,6 +225,28 @@ def setup_mlflow(cfg):
     env_file.write_text("\n".join(content))
     env_file.chmod(0o755)
 
+def ensure_minimal_executions_structure():
+    base_src = ROOT / "setup" / "executions"
+    base_dst = ROOT / "executions"
+
+    base_dst.mkdir(exist_ok=True)
+
+    if not base_src.exists():
+        print("[WARN] No existe setup/executions — no se copian base_params")
+        return
+
+    for phase_dir in base_src.iterdir():
+        if not phase_dir.is_dir():
+            continue
+
+        dst_phase = base_dst / phase_dir.name
+        dst_phase.mkdir(exist_ok=True)
+
+        for f in phase_dir.iterdir():
+            dst_file = dst_phase / f.name
+            if not dst_file.exists():
+                shutil.copy(f, dst_file)
+                print(f"[INFO] Copiado base estático: {dst_file}")
 
 # ============================================================
 # MAIN
@@ -246,8 +268,11 @@ def main():
     import yaml
 
     if CONFIG_FILE.exists():
-        print("[INFO] Setup ya realizado")
-        return
+        abort(
+            "El proyecto ya tiene un setup previo.\n"
+            "Ejecuta primero: make clean-setup\n"
+            "y después vuelve a lanzar make setup."
+        )
 
     cfg_path = Path(args.config)
     if not cfg_path.exists():
@@ -261,6 +286,7 @@ def main():
 
     CONFIG_DIR.mkdir(exist_ok=True)
     CONFIG_FILE.write_text(yaml.dump(cfg))
+    ensure_minimal_executions_structure()
 
     print("\n✔ Setup completado correctamente")
     print("Ejecuta ahora: make check-setup")

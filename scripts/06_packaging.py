@@ -121,10 +121,19 @@ def main(variant: str):
             raise FileNotFoundError(f"No existe F05: {v05}")
 
         f05_params = yaml.safe_load(p.read_text())
+        prediction_name = f05_params.get("prediction_name")
+        if not prediction_name:
+            raise RuntimeError(
+                f"F05 {v05} no contiene prediction_name en params.yaml"
+            )
         v04 = f05_params["parent_variant"]
 
         lineage["f04"].add(v04)
-        f05_to_f04[v05] = v04
+        f05_to_f04[v05] = {
+            "f04": v04,
+            "prediction_name": prediction_name,
+        }
+
 
     # F04 → F03
     for v04 in lineage["f04"]:
@@ -225,7 +234,9 @@ def main(variant: str):
             )
 
         src = model_dirs[0]
-        dst = models_dir / f"{v05}__{src.name}"
+        prediction_name = f05_to_f04[v05]["prediction_name"]
+
+        dst = models_dir / f"{prediction_name}__{src.name}"
 
         if dst.exists():
             shutil.rmtree(dst)
@@ -235,6 +246,7 @@ def main(variant: str):
         selected_models.append({
             "source_f05": v05,
             "model_id": src.name,
+            "prediction_name": prediction_name,
         })
 
     print(f"[OK] {len(selected_models)} modelos copiados")

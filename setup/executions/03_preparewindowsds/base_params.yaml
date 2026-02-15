@@ -1,0 +1,15 @@
+# ============================================================
+# Base parameters for Phase 03: preparewindowsds
+# They provide defaults used when generating variant parameters.
+# ============================================================
+
+window_strategy: null     # one of: synchro, asynOW, withinPW, asynPW
+nan_strategy: null       # preserve | discard
+
+# Default temporal parameters (can be overridden by variant3)
+OW: null                        # Observation Window (seconds)
+LT: null                        # Lead Time (seconds)
+PW: null                        # Prediction Window (seconds)
+
+# Tu is inherited from phase02, so set to null here
+Tu: null

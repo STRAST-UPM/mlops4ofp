@@ -76,12 +76,6 @@ def compute_class_weights(y):
 
 
 def apply_rare_events(df, imbalance_cfg, seed):
-    """
-    Política rare_events:
-    - Asume label=1 como clase minoritaria.
-    - Mantiene TODOS los positivos.
-    - Limita número de negativos a max_majority_samples.
-    """
     strategy = imbalance_cfg.get("strategy", "none")
 
     if strategy != "rare_events":
@@ -118,9 +112,6 @@ def apply_rare_events(df, imbalance_cfg, seed):
     return df_new, info
 
 
-
-
-
 def pad_sequences(seqs, max_len, pad_value=0):
     out = np.full((len(seqs), max_len), pad_value, dtype=np.int32)
     for i, s in enumerate(seqs):
@@ -145,7 +136,12 @@ def vectorize_dense_bow(df):
         for ev in s:
             X[i, index[ev]] += 1.0
 
-    return X, y, {"input_dim": X.shape[1]}
+    return X, y, {
+        "input_dim": X.shape[1],
+        "vocab": vocab,
+        "vectorization": "dense_bow"
+    }
+
 
 
 def build_dense_bow_model(aux, hp):
@@ -172,19 +168,23 @@ def vectorize_sequence(df):
     max_len = int(np.percentile([len(s) for s in seqs_idx], 95))
     X = pad_sequences(seqs_idx, max_len)
 
-    return X, y, {"vocab_size": len(vocab), "max_len": max_len}
+    return X, y, {
+        "vocab": vocab,
+        "vocab_size": len(vocab),
+        "max_len": max_len,
+        "vectorization": "sequence"
+    }
+
 
 
 def build_sequence_embedding_model(aux, hp):
     model = keras.Sequential()
     model.add(layers.Input(shape=(aux["max_len"],)))
-    model.add(
-        layers.Embedding(
-            input_dim=aux["vocab_size"] + 1,
-            output_dim=hp["embed_dim"],
-            mask_zero=True,
-        )
-    )
+    model.add(layers.Embedding(
+        input_dim=aux["vocab_size"] + 1,
+        output_dim=hp["embed_dim"],
+        mask_zero=True,
+    ))
     model.add(layers.GlobalAveragePooling1D())
 
     for _ in range(hp["n_layers"]):
@@ -199,20 +199,16 @@ def build_sequence_embedding_model(aux, hp):
 def build_cnn1d_model(aux, hp):
     model = keras.Sequential()
     model.add(layers.Input(shape=(aux["max_len"],)))
-    model.add(
-        layers.Embedding(
-            input_dim=aux["vocab_size"] + 1,
-            output_dim=hp["embed_dim"],
-        )
-    )
-    model.add(
-        layers.Conv1D(
-            filters=hp["filters"],
-            kernel_size=hp["kernel_size"],
-            activation="relu",
-            padding="same",
-        )
-    )
+    model.add(layers.Embedding(
+        input_dim=aux["vocab_size"] + 1,
+        output_dim=hp["embed_dim"],
+    ))
+    model.add(layers.Conv1D(
+        filters=hp["filters"],
+        kernel_size=hp["kernel_size"],
+        activation="relu",
+        padding="same",
+    ))
     model.add(layers.GlobalMaxPooling1D())
 
     for _ in range(hp["n_layers"]):
@@ -229,8 +225,6 @@ MODEL_FAMILIES = {
     "sequence_embedding": (vectorize_sequence, build_sequence_embedding_model),
     "cnn1d": (vectorize_sequence, build_cnn1d_model),
 }
-
-
 
 
 # ============================================================
@@ -258,6 +252,21 @@ def main(variant: str):
         params = yaml.safe_load(f)
 
     parent_variant = params["parent_variant"]
+
+    f04_metadata_path = (
+        Path("executions")
+        / "04_targetengineering"
+        / parent_variant
+        / "04_targetengineering_metadata.json"
+    )
+
+    with open(f04_metadata_path) as f:
+        f04_metadata = json.load(f)
+
+    prediction_name = f04_metadata.get("prediction_name")
+    if not prediction_name:
+        raise ValueError("prediction_name no definido en F04 metadata")
+
     model_family = params["model_family"]
 
     vectorize_fn, build_model_fn = MODEL_FAMILIES[model_family]
@@ -280,38 +289,17 @@ def main(variant: str):
         / "04_targetengineering_dataset.parquet"
     )
 
-    print(">> Antes de leer parquet")
     df = pd.read_parquet(dataset_path)
-    print(">> Parquet leído")
 
     imbalance_cfg = params.get("imbalance", {})
-    sampler_info = {}
-
-    # 1️⃣ Aplicar rare_events primero (si procede)
     df, sampler_info = apply_rare_events(df, imbalance_cfg, seed)
 
-    print("\n===== SAMPLING DEBUG =====")
-    print("strategy:", imbalance_cfg.get("strategy"))
-    print("total rows:", len(df))
-    print("positives:", (df["label"]==1).sum())
-    print("negatives:", (df["label"]==0).sum())
-    print("==========================\n")
-
-
-
-    # 2️⃣ Aplicar max_samples solo si NO estamos en rare_events
     max_samples = params["training"].get("max_samples")
     if imbalance_cfg.get("strategy") != "rare_events":
         if max_samples is not None and len(df) > max_samples:
             df = df.sample(n=max_samples, random_state=seed)
 
-    print("After rare_events:")
-    print("  rows:", len(df))
-    print("  positives:", (df["label"]==1).sum())
-    print("  negatives:", (df["label"]==0).sum())
-
     X, y, aux = vectorize_fn(df)
-
 
     idx = np.arange(len(X))
     np.random.shuffle(idx)
@@ -390,12 +378,23 @@ def main(variant: str):
             best_model = model
             best_hp = hp
 
-    final_model_path = variant_root / "model_final.h5"
+    # --------------------------------------------------
+    # Guardar modelo oficial en carpeta estructurada
+    # --------------------------------------------------
+    safe_name = prediction_name.lower().replace(" ", "_")
+
+    models_root = variant_root / "models"
+    model_dir = models_root / safe_name
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    final_model_path = model_dir / "model.h5"
     best_model.save(final_model_path)
 
+    # --------------------------------------------------
+    # Evaluación en test
+    # --------------------------------------------------
     from sklearn.metrics import confusion_matrix, precision_score, f1_score, recall_score
 
-    # Predicción en TEST
     y_pred_prob = best_model.predict(X_test, verbose=0)
     y_pred = (y_pred_prob >= 0.5).astype(int).ravel()
 
@@ -404,64 +403,98 @@ def main(variant: str):
     recall = float(recall_score(y_test, y_pred, zero_division=0))
     f1 = float(f1_score(y_test, y_pred, zero_division=0))
 
-    print("\n=== TEST METRICS (best model) ===")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall:    {recall:.4f}")
-    print(f"F1:        {f1:.4f}")
-    print("Confusion Matrix:")
-    print(cm)
-
+    # --------------------------------------------------
+    # Paths metadata
+    # --------------------------------------------------
     trace_metadata_path = variant_root / f"{PHASE}_metadata.json"
-    functional_metadata_path = variant_root / "model_summary.json"
+    functional_metadata_path = model_dir / "model_summary.json"
 
+    # --------------------------------------------------
+    # Metadata funcional completa (runtime-safe)
+    # --------------------------------------------------
     metadata = {
         "phase": PHASE,
         "variant": variant,
         "parent_variant": parent_variant,
+
+        "prediction_name": safe_name,
+        "model_name": f"{safe_name} ({model_family})",
         "model_family": model_family,
-        "num_experiments": len(trials_summary),
-        "best_val_recall": float(best_recall),
-        "best_hyperparameters": best_hp,
+
         "model_path": str(final_model_path),
+
+        "vectorization": aux,          # ← incluye vocab / max_len / input_dim
+        "threshold": 0.5,
+
         "dataset_path": str(dataset_path),
+
         "split_sizes": {
             "train": int(len(train_idx)),
             "val": int(len(val_idx)),
             "test": int(len(test_idx))
         },
+
         "imbalance_policy": {
             "config": imbalance_cfg,
             "sampler_info": sampler_info
         },
+
+        "num_experiments": len(trials_summary),
+        "best_val_recall": float(best_recall),
+        "best_hyperparameters": best_hp,
+
         "test_metrics": {
             "precision": precision,
             "recall": recall,
             "f1": f1,
             "confusion_matrix": cm
         },
+
         "trials_summary": trials_summary,
-        "mlflow": {
-            "run_id": None,
-            "published": False
+
+        "mlflow_registration": {
+            "experiment_name": f"F05_{safe_name}",
+            "run_name": f"{safe_name}__{variant}",
+            "metrics": {
+                "val_recall": float(best_recall),
+                "test_precision": precision,
+                "test_recall": recall,
+                "test_f1": f1
+            },
+            "params": best_hp,
+            "artifacts": [
+                str(final_model_path),
+                str(functional_metadata_path)
+            ]
         },
+
         "git": {
             "commit": get_git_hash()
         },
+
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
+    # --------------------------------------------------
+    # Guardar metadata funcional junto al modelo
+    # --------------------------------------------------
     with open(functional_metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
+    # --------------------------------------------------
+    # Trazabilidad oficial de fase
+    # --------------------------------------------------
     write_metadata(
         stage=PHASE,
         variant=variant,
         parent_variant=parent_variant,
+        name=safe_name,
         inputs=[str(dataset_path)],
-        outputs=[str(functional_metadata_path)],
+        outputs=[str(model_dir)],
         params=params,
         metadata_path=trace_metadata_path,
     )
+
 
     print(f"[DONE] Fase 05 completada en {perf_counter()-t_start:.1f}s")
 

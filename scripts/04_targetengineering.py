@@ -82,8 +82,12 @@ def main(variant: str):
     with open(variant_root / "params.yaml", "r", encoding="utf-8") as f:
         params = yaml.safe_load(f)
 
+    prediction_name = params.get("prediction_name")
     prediction_objective = params.get("prediction_objective")
     parent_variant_f03 = params.get("parent_variant")
+
+    if not prediction_name:
+        raise ValueError("prediction_name must be defined in F04 params.")
 
     if not prediction_objective:
         raise ValueError("prediction_objective no definido en params.yaml")

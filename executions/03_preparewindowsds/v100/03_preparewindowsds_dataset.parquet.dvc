@@ -1,5 +1,0 @@
-outs:
-- md5: 5e2b4a1ccb5e9bb654302c1494bf7bf6
-  size: 14227880
-  hash: md5
-  path: 03_preparewindowsds_dataset.parquet

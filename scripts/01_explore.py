@@ -162,6 +162,13 @@ def main():
     else:
         df = pd.read_parquet(raw_copy)
 
+    max_lines = params.get("max_lines")
+    first_line = params.get("first_line")
+    if max_lines is not None or first_line is not None:
+        start_idx = max(int(first_line or 1) - 1, 0)
+        end_idx = start_idx + int(max_lines) if max_lines is not None else None
+        df = df.iloc[start_idx:end_idx].reset_index(drop=True)
+
     df, Tu_value = prepare_time_axis(df)
     df_clean, nan_repl_value = apply_cleaning(df, params)
 

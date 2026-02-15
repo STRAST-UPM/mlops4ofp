@@ -73,6 +73,14 @@ param_rules:
       type: dict          # debe ser diccionario
       required: true
 
+    max_lines:
+      type: integer
+      required: false
+
+    first_line:
+      type: integer
+      required: false
+
 
   "02_prepareeventsds":
     band_thresholds_pct:
@@ -139,6 +147,11 @@ param_rules:
 
   "04_targetengineering":
 
+    prediction_name:
+      type: string
+      required: true
+      regex: "^[a-z0-9_]+$"
+
     prediction_objective:
       type: dict
       required: true
@@ -200,5 +213,15 @@ param_rules:
       type: string
       required: false
 
+  "07_deployrun":
+
+    parent_variant_f06:
+      type: string
+      required: true
+      regex: "^v[0-9]{3}$"
+
+    runtime:
+      type: dict
+      required: true
 
   
