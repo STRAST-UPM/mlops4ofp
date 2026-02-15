@@ -25,15 +25,26 @@ make variant1 VARIANT=v001 RAW=data/raw.csv [opciones]
 | `RAW` | Obligatorio | Ruta al archivo CSV original | `data/raw.csv` |
 | `CLEANING_STRATEGY` | Opcional | Estrategia de limpieza aplicada : `none` (defecto),  `basic` , `full` |  `basic`  |
 | `NAN_VALUES` | Opcional | Lista de valores a tratar como NaN | `'[-999999]'` |
-| `ERROR_VALUES` | Opcional | Diccionario JSON de valores erróneos | `'{"voltage":[-1]}'` |
-
+| `ERROR_VALUES` | Opcional | Diccionario JSON de valores erróneos | `'{"voltage":[-1]}'` || `FIRST_LINE` | Opcional | Primera línea del dataset a procesar (por defecto: 1) | `100` |
+| `MAX_LINES` | Opcional | Número máximo de líneas a procesar desde `FIRST_LINE` | `10000` |
 #### Estrategias de limpieza
 
 - **`none`**: no aplica limpieza.
 - **`basic`**: convierte en NaN los valores definidos en `NAN_VALUES`.
 - **`full`**: aplica `NAN_VALUES` + reglas específicas por columna de `ERROR_VALUES`.
 
+#### Procesamiento parcial del dataset
 
+Los parámetros `FIRST_LINE` y `MAX_LINES` permiten procesar solo una porción del dataset original. Esto es útil para:
+
+- **Pruebas rápidas**: Experimentar con diferentes estrategias de limpieza sobre un subconjunto de datos.
+- **Desarrollo iterativo**: Validar el pipeline con datos reducidos antes de procesar el dataset completo.
+- **Análisis temporal**: Seleccionar períodos específicos del dataset (ej: procesar solo el primer trimestre).
+
+> **Ejemplo:** Para procesar desde la línea 1000 hasta la 11000 (10.000 líneas):
+> ```bash
+> make variant1 VARIANT=v003 RAW=data/raw.csv FIRST_LINE=1000 MAX_LINES=10000
+> ```
 
 > **Nota:** A continuación se muestra un ejemplo completo de creación de variante con parámetros específicos.
 >
@@ -41,7 +52,9 @@ make variant1 VARIANT=v001 RAW=data/raw.csv [opciones]
 > make variant1 VARIANT=v005 RAW=data/raw.csv \
 >   CLEANING_STRATEGY=basic \
 >   NAN_VALUES="[-999999, None]" \
->   ERROR_VALUES='{"Battery_Active_Power":[-1],"MG-LV-MSB_Frequency":[-327.0]}'
+>   ERROR_VALUES='{"Battery_Active_Power":[-1],"MG-LV-MSB_Frequency":[-327.0]}' \
+>   FIRST_LINE=1 \
+>   MAX_LINES=50000
 > ```
 >
 > El archivo generado `executions/01_explore/v005/params.yaml` quedará:
@@ -56,6 +69,8 @@ make variant1 VARIANT=v001 RAW=data/raw.csv [opciones]
 >   MG-LV-MSB_Frequency:
 >     - -327.0
 > raw_dataset_path: data/raw.csv
+> first_line: 1
+> max_lines: 50000
 > ```
 
 ## Flujo de trabajo recomendado
