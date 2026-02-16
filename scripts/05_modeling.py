@@ -75,6 +75,20 @@ def compute_class_weights(y):
     return {0: 1.0, 1: neg / pos}
 
 
+def convert_to_native_types(obj):
+    """Convierte tipos numpy a tipos nativos de Python para serialización JSON."""
+    if isinstance(obj, dict):
+        return {k: convert_to_native_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_native_types(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    else:
+        return obj
+
+
 def apply_rare_events(df, imbalance_cfg, seed):
     strategy = imbalance_cfg.get("strategy", "none")
 
@@ -263,7 +277,7 @@ def main(variant: str):
     with open(f04_metadata_path) as f:
         f04_metadata = json.load(f)
 
-    prediction_name = f04_metadata.get("prediction_name")
+    prediction_name = f04_metadata.get("params", {}).get("prediction_name")
     if not prediction_name:
         raise ValueError("prediction_name no definido en F04 metadata")
 
@@ -340,6 +354,7 @@ def main(variant: str):
     for trial in range(params["automl"]["max_trials"]):
 
         hp = {k: random.choice(v) for k, v in full_space.items()}
+        hp = convert_to_native_types(hp)  # Convertir tipos numpy a Python nativos
 
         model = build_model_fn(aux, hp)
         model.compile(
@@ -479,7 +494,9 @@ def main(variant: str):
     # Guardar metadata funcional junto al modelo
     # --------------------------------------------------
     with open(functional_metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
+        # Convertir todos los tipos numpy a tipos nativos de Python antes de serializar
+        metadata_native = convert_to_native_types(metadata)
+        json.dump(metadata_native, f, indent=2)
 
     # --------------------------------------------------
     # Trazabilidad oficial de fase
@@ -488,7 +505,6 @@ def main(variant: str):
         stage=PHASE,
         variant=variant,
         parent_variant=parent_variant,
-        name=safe_name,
         inputs=[str(dataset_path)],
         outputs=[str(model_dir)],
         params=params,

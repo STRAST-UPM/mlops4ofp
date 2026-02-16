@@ -1,8 +1,6 @@
 band_thresholds_pct:
-- 10
-- 25
-- 50
-- 75
+- 40
+- 60
 - 90
 event_strategy: transitions
 nan_handling: keep

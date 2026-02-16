@@ -1,0 +1,8 @@
+prediction_objective:
+  operator: OR
+  events:
+  - Battery_Active_Power_0_40-to-90_100
+  - Battery_Active_Power_40_60-to-90_100
+  - Battery_Active_Power_60_90-to-90_100
+parent_variant: v100
+prediction_name: Battery_Active_Power_any-to-90_100

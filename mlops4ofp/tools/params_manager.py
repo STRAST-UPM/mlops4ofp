@@ -159,6 +159,24 @@ def validate_params(phase: str, params: dict, project_root: Path):
                 raise ValueError(f"Parámetro {key} debe ser numérico, recibido: {type(value)}")
 
         elif expected_type == "list":
+            # Permitir conversión automática de string a lista solo si no parece ser YAML/JSON
+            if isinstance(value, str):
+                # No convertir si parece ser un formato de lista YAML/JSON
+                stripped = value.strip()
+                if not (stripped.startswith('[') and stripped.endswith(']')):
+                    # Dividir por espacios o comas para casos como "v111 v112" o "v111,v112"
+                    if ',' in value:
+                        value = [v.strip() for v in value.split(',') if v.strip()]
+                    else:
+                        value = [v.strip() for v in value.split() if v.strip()]
+                    params[key] = value
+                else:
+                    # Si parece ser lista YAML/JSON pero llegó como string, hay un error
+                    raise ValueError(
+                        f"Parámetro {key} tiene formato de lista pero llegó como string. "
+                        f"Valor: {value}"
+                    )
+            
             if not isinstance(value, list):
                 raise ValueError(f"Parámetro {key} debe ser una lista")
             elem_type = rules.get("element_type")

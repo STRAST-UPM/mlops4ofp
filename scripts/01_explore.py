@@ -42,7 +42,7 @@ from mlops4ofp.tools.artifacts import (
     save_numeric_dataset,
     save_params_and_metadata,
 )
-import mlops4ofp.tools.html_reports.html01Old as explore_report
+import mlops4ofp.tools.html_reports.html01 as explore_report
 
 execution_dir = detect_execution_dir()
 PROJECT_ROOT = detect_project_root(execution_dir)
