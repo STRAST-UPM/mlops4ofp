@@ -1,7 +1,1 @@
-variants:
-  v602:
-    created_at: '2026-02-16T15:19:07.850733+00:00'
-    params_path: /Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/06_packaging/v602/params.yaml
-    parent_variants_f05:
-    - v111
-    - v112
+variants: {}
