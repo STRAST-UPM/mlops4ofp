@@ -121,12 +121,28 @@ def main(variant: str):
             raise FileNotFoundError(f"No existe F05: {v05}")
 
         f05_params = yaml.safe_load(p.read_text())
-        prediction_name = f05_params.get("prediction_name")
-        if not prediction_name:
-            raise RuntimeError(
-                f"F05 {v05} no contiene prediction_name en params.yaml"
-            )
         v04 = f05_params["parent_variant"]
+        
+        # Buscar el modelo en la carpeta models/ (solo debe haber uno)
+        models_dir = project_root / "executions" / "05_modeling" / v05 / "models"
+        if not models_dir.exists():
+            raise FileNotFoundError(f"No existe carpeta models/ en F05 {v05}")
+        
+        model_dirs = [d for d in models_dir.iterdir() if d.is_dir()]
+        if len(model_dirs) == 0:
+            raise RuntimeError(f"F05 {v05} no contiene ningún modelo en models/")
+        if len(model_dirs) > 1:
+            raise RuntimeError(f"F05 {v05} contiene múltiples modelos (se espera solo uno)")
+        
+        model_dir = model_dirs[0]
+        model_summary_path = model_dir / "model_summary.json"
+        if not model_summary_path.exists():
+            raise FileNotFoundError(f"No existe model_summary.json en {model_dir}")
+        
+        model_summary = json.loads(model_summary_path.read_text())
+        prediction_name = model_summary.get("prediction_name")
+        if not prediction_name:
+            raise RuntimeError(f"F05 {v05} no contiene prediction_name en model_summary.json")
 
         lineage["f04"].add(v04)
         f05_to_f04[v05] = {
@@ -152,9 +168,9 @@ def main(variant: str):
         f03_params = yaml.safe_load(p.read_text())
 
         regime = (
-            f03_params["temporal"]["Tu"],
-            f03_params["temporal"]["OW"],
-            f03_params["temporal"]["PW"],
+            f03_params.get("Tu"),
+            f03_params.get("OW"),
+            f03_params.get("PW"),
         )
         regimes.add(regime)
 

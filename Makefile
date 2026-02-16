@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 ############################################
 # CARGA AUTOMÁTICA DE VARIABLES DE ENTORNO
 # (MLflow, etc.)
@@ -155,7 +157,7 @@ publish-generic: check-variant-format
 	fi
 
 	# Determinamos modo publish
-	@MODE=$$($(PYTHON) -c 'import yaml,pathlib;cfg=pathlib.Path(".mlops4ofp/setup.yaml");print("error" if not cfg.exists() else yaml.safe_load(cfg.read_text()).get("git",{}).get("mode","none"))'); \
+	@MODE=$$($(PYTHON) -c "import yaml,pathlib;cfg=pathlib.Path('.mlops4ofp/setup.yaml');print('error' if not cfg.exists() else yaml.safe_load(cfg.read_text()).get('git',{}).get('mode','none'))"); \
 	if [ "$$MODE" = "custom" ]; then \
 		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
@@ -193,7 +195,7 @@ remove-generic: check-variant-format
 
 	@git commit -m "remove variant: $(PHASE) $(VARIANT)" || true
 
-	@MODE=$$($(PYTHON) -c 'import yaml,pathlib;cfg=pathlib.Path(".mlops4ofp/setup.yaml");print("error" if not cfg.exists() else yaml.safe_load(cfg.read_text()).get("git",{}).get("mode","none"))'); \
+	@MODE=$$($(PYTHON) -c "import yaml,pathlib;cfg=pathlib.Path('.mlops4ofp/setup.yaml');print('error' if not cfg.exists() else yaml.safe_load(cfg.read_text()).get('git',{}).get('mode','none'))"); \
 	if [ "$$MODE" = "custom" ]; then \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
@@ -1332,17 +1334,12 @@ endif
 	$(PYTHON) mlops4ofp/tools/params_manager.py create-variant \
 		--phase $(PHASE7) \
 		--variant $(VARIANT) \
-		--base $(BASE_PARAMS_07)
-
-	@echo "==> Estableciendo parent_variant_f06 en params.yaml"
-	$(PYTHON) mlops4ofp/tools/params_manager.py set-param \
-		--phase $(PHASE7) \
-		--variant $(VARIANT) \
-		--key parent_variant_f06 \
-		--value $(PARENT)
+		--set parent_variant_f06=$(PARENT)
 
 	@echo "==> Generando manifest.json"
-	$(PYTHON) notebooks/07_deployrun.ipynb --mode prepare
+	$(PYTHON) $(SCRIPT_07) --variant $(VARIANT) --mode prepare
+
+	@echo "[OK] Variante F07 $(VARIANT) creada"
 
 
 script7-run: check-variant-format
@@ -1353,13 +1350,12 @@ script7-run: check-variant-format
 
 nb7-run: check-variant-format
 	@echo "==> Ejecutando F07 (notebook) para variante $(VARIANT)"
-	$(JUPYTER) nbconvert \
+	ACTIVE_VARIANT=$(VARIANT) $(JUPYTER) nbconvert \
 		--execute $(NOTEBOOK_07) \
 		--to notebook \
-		--output $(NOTEBOOK_07) \
+		--inplace \
 		--ExecutePreprocessor.timeout=-1 \
-		--ExecutePreprocessor.kernel_name=python3 \
-		--ExecutePreprocessor.extra_arguments="--variant=$(VARIANT)"
+		--ExecutePreprocessor.kernel_name=python3
 
 publish7: check-variant-format
 	@echo "==> Publicando F07 $(VARIANT)"
@@ -1465,23 +1461,7 @@ print(cfg['dvc']['repo'])"); \
 
 
 
-help:
-	@echo "==============================================="
-	@echo " MLOps4OFP — Pipeline en 4 Fases"
-	@echo "==============================================="
-	@echo ""
-	@echo " FASE 01: EXPLORE (análisis de datos RAW)"
-	@echo "   make help1"
-	@echo ""
-	@echo " FASE 02: PREPARE EVENTS (ingeniería de eventos)"
-	@echo "   make help2"
-	@echo ""
-	@echo " FASE 03: PREPARE WINDOWS (generación de ventanas)"
-	@echo "   make help3"
-	@echo ""
-	@echo " MANTENIMIENTO:"
-	@echo "   make help-setup          # Setup inicial del proyecto"
-	@echo ""
+help: help-setup help1 help2 help3 help4 help5 help6 help7
 	@echo "==============================================="
 
 .PHONY: \

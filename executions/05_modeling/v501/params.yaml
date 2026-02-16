@@ -1,4 +1,4 @@
-parent_variant: v101
+parent_variant: v401
 model_family: dense_bow
 automl:
   max_trials: 3
