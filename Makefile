@@ -78,43 +78,43 @@ check-setup:
 
 clean-setup:
 	@echo "==> Eliminando MLflow asociado al proyecto (si existe)"
-	@$(PYTHON) - <<'EOF'
-import yaml, pathlib, subprocess, os, shutil, json, sys
+	@$(PYTHON) - <<-'EOF'
+	import yaml, pathlib, subprocess, os, shutil, json, sys
 
-cfg_path = pathlib.Path(".mlops4ofp/setup.yaml")
-if not cfg_path.exists():
-    sys.exit(0)
+	cfg_path = pathlib.Path(".mlops4ofp/setup.yaml")
+	if not cfg_path.exists():
+		sys.exit(0)
 
-cfg = yaml.safe_load(cfg_path.read_text())
-ml = cfg.get("mlflow", {})
+	cfg = yaml.safe_load(cfg_path.read_text())
+	ml = cfg.get("mlflow", {})
 
-if not ml.get("enabled", False):
-    sys.exit(0)
+	if not ml.get("enabled", False):
+		sys.exit(0)
 
-uri = ml.get("tracking_uri", "")
+	uri = ml.get("tracking_uri", "")
 
-if uri.startswith("file:"):
-    path = uri.replace("file:", "")
-    if os.path.exists(path):
-        print(f"[INFO] Eliminando MLflow local en {path}")
-        shutil.rmtree(path)
-else:
-    print("[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)")
-    try:
-        out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
-        experiments = json.loads(out)
-        for exp in experiments:
-            name = exp.get("name", "")
-            exp_id = exp.get("experiment_id")
-            if name.startswith("F05_") and exp_id:
-                print(f"[INFO] Eliminando experimento remoto {name}")
-                subprocess.run(
-                    ["mlflow", "experiments", "delete", "--experiment-id", exp_id],
-                    check=False
-                )
-    except Exception as e:
-        print("[WARN] No se pudo limpiar MLflow remoto:", e)
-EOF
+	if uri.startswith("file:"):
+		path = uri.replace("file:", "")
+		if os.path.exists(path):
+			print(f"[INFO] Eliminando MLflow local en {path}")
+			shutil.rmtree(path)
+	else:
+		print("[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)")
+		try:
+			out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
+			experiments = json.loads(out)
+			for exp in experiments:
+				name = exp.get("name", "")
+				exp_id = exp.get("experiment_id")
+				if name.startswith("F05_") and exp_id:
+					print(f"[INFO] Eliminando experimento remoto {name}")
+					subprocess.run(
+						["mlflow", "experiments", "delete", "--experiment-id", exp_id],
+						check=False
+					)
+		except Exception as e:
+			print("[WARN] No se pudo limpiar MLflow remoto:", e)
+	EOF
 	@echo "==> Eliminando entorno completo del proyecto ML"
 	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv executions
 	@echo "[OK] Proyecto ML reinicializado. Ejecuta 'make setup' para reconstruir estructura base."
@@ -189,15 +189,15 @@ publish-generic: check-variant-format
 
 	# Determinamos modo publish
 	@MODE=$$($(PYTHON) - <<'EOF'
-import yaml, pathlib
-cfg = pathlib.Path(".mlops4ofp/setup.yaml")
-if not cfg.exists():
-    print("error")
-else:
-    data = yaml.safe_load(cfg.read_text())
-    print(data.get("git", {}).get("mode", "none"))
-EOF
-); \
+	import yaml, pathlib
+	cfg = pathlib.Path(".mlops4ofp/setup.yaml")
+	if not cfg.exists():
+		print("error")
+	else:
+		data = yaml.safe_load(cfg.read_text())
+		print(data.get("git", {}).get("mode", "none"))
+	EOF
+	); \
 
 	if [ "$$MODE" = "custom" ]; then \
 		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
@@ -237,15 +237,15 @@ remove-generic: check-variant-format
 	@git commit -m "remove variant: $(PHASE) $(VARIANT)" || true
 
 	@MODE=$$($(PYTHON) - <<'EOF'
-import yaml, pathlib
-cfg = pathlib.Path(".mlops4ofp/setup.yaml")
-if not cfg.exists():
-    print("error")
-else:
-    data = yaml.safe_load(cfg.read_text())
-    print(data.get("git", {}).get("mode", "none"))
-EOF
-); \
+	import yaml, pathlib
+	cfg = pathlib.Path(".mlops4ofp/setup.yaml")
+	if not cfg.exists():
+		print("error")
+	else:
+		data = yaml.safe_load(cfg.read_text())
+		print(data.get("git", {}).get("mode", "none"))
+	EOF
+	); \
 	if [ "$$MODE" = "custom" ]; then \
 		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
@@ -1026,65 +1026,65 @@ publish5: check-variant-format
 	fi; \
 	echo "==> Registrando run en MLflow"; \
 	$(PYTHON) - <<EOF \
-import json, subprocess, os, sys
+	import json, subprocess, os, sys
 
-meta_path = "$$META"
-with open(meta_path) as f:
-    data = json.load(f)
+	meta_path = "$$META"
+	with open(meta_path) as f:
+		data = json.load(f)
 
-reg = data.get("mlflow_registration")
-if not reg:
-    print("[ERROR] No existe bloque mlflow_registration en metadata")
-    sys.exit(1)
+	reg = data.get("mlflow_registration")
+	if not reg:
+		print("[ERROR] No existe bloque mlflow_registration en metadata")
+		sys.exit(1)
 
-exp_name = reg["experiment_name"]
-metrics = reg.get("metrics", {})
-params = reg.get("params", {})
-artifacts = reg.get("artifacts", [])
+	exp_name = reg["experiment_name"]
+	metrics = reg.get("metrics", {})
+	params = reg.get("params", {})
+	artifacts = reg.get("artifacts", [])
 
-# Crear experimento si no existe
-subprocess.run(["mlflow", "experiments", "create", "--experiment-name", exp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	# Crear experimento si no existe
+	subprocess.run(["mlflow", "experiments", "create", "--experiment-name", exp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-# Obtener experiment_id
-out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
-import json as _json
-exps = _json.loads(out)
-exp_id = next((e["experiment_id"] for e in exps if e["name"] == exp_name), None)
+	# Obtener experiment_id
+	out = subprocess.check_output(["mlflow", "experiments", "list", "--format", "json"])
+	import json as _json
+	exps = _json.loads(out)
+	exp_id = next((e["experiment_id"] for e in exps if e["name"] == exp_name), None)
 
-if not exp_id:
-    print("[ERROR] No se pudo obtener experiment_id")
-    sys.exit(1)
+	if not exp_id:
+		print("[ERROR] No se pudo obtener experiment_id")
+		sys.exit(1)
 
-# Crear run
-out = subprocess.check_output(["mlflow", "runs", "create", "--experiment-id", exp_id, "--format", "json"])
-run = _json.loads(out)
-run_id = run["info"]["run_id"]
+	# Crear run
+	out = subprocess.check_output(["mlflow", "runs", "create", "--experiment-id", exp_id, "--format", "json"])
+	run = _json.loads(out)
+	run_id = run["info"]["run_id"]
 
-# Log params
-for k, v in params.items():
-    subprocess.run(["mlflow", "runs", "log-param", "--run-id", run_id, "--key", str(k), "--value", str(v)])
+	# Log params
+	for k, v in params.items():
+		subprocess.run(["mlflow", "runs", "log-param", "--run-id", run_id, "--key", str(k), "--value", str(v)])
 
-# Log metrics
-for k, v in metrics.items():
-    subprocess.run(["mlflow", "runs", "log-metric", "--run-id", run_id, "--key", str(k), "--value", str(v)])
+	# Log metrics
+	for k, v in metrics.items():
+		subprocess.run(["mlflow", "runs", "log-metric", "--run-id", run_id, "--key", str(k), "--value", str(v)])
 
-# Log artifacts
-for a in artifacts:
-    if os.path.exists(a):
-        subprocess.run(["mlflow", "runs", "log-artifact", "--run-id", run_id, "--local-path", a])
+	# Log artifacts
+	for a in artifacts:
+		if os.path.exists(a):
+			subprocess.run(["mlflow", "runs", "log-artifact", "--run-id", run_id, "--local-path", a])
 
-# Guardar run_id en metadata
-data["mlflow"] = {
-    "run_id": run_id,
-    "experiment_id": exp_id,
-    "experiment_name": exp_name
-}
+	# Guardar run_id en metadata
+	data["mlflow"] = {
+		"run_id": run_id,
+		"experiment_id": exp_id,
+		"experiment_name": exp_name
+	}
 
-with open(meta_path, "w") as f:
-    json.dump(data, f, indent=2)
+	with open(meta_path, "w") as f:
+		json.dump(data, f, indent=2)
 
-print(f"[OK] Run MLflow creado: {run_id}")
-EOF
+	print(f"[OK] Run MLflow creado: {run_id}")
+	EOF
 
 	$(MAKE) publish-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) \
 		PUBLISH_EXTS="parquet json html h5" VARIANT=$(VARIANT)
@@ -1098,40 +1098,40 @@ remove5: check-variant-format
 	if [ -f $$META ]; then \
 		echo "==> Revisando metadata MLflow"; \
 		$(PYTHON) - <<EOF \
-import json, subprocess, sys
+	import json, subprocess, sys
 
-meta_path = "$$META"
+	meta_path = "$$META"
 
-with open(meta_path) as f:
-    data = json.load(f)
+	with open(meta_path) as f:
+		data = json.load(f)
 
-ml = data.get("mlflow", {})
-run_id = ml.get("run_id")
-exp_id = ml.get("experiment_id")
+	ml = data.get("mlflow", {})
+	run_id = ml.get("run_id")
+	exp_id = ml.get("experiment_id")
 
-# 1️⃣ Borrar run si existe
-if run_id:
-    print(f"[INFO] Eliminando run MLflow {run_id}")
-    subprocess.run(["mlflow", "runs", "delete", "--run-id", run_id], check=False)
+	# 1️⃣ Borrar run si existe
+	if run_id:
+		print(f"[INFO] Eliminando run MLflow {run_id}")
+		subprocess.run(["mlflow", "runs", "delete", "--run-id", run_id], check=False)
 
-# 2️⃣ Si hay experiment_id, comprobar si quedan runs activos
-if exp_id:
-    try:
-        out = subprocess.check_output(
-            ["mlflow", "runs", "list", "--experiment-id", exp_id, "--format", "json"]
-        )
-        runs = json.loads(out)
-        active = [r for r in runs if r["info"]["lifecycle_stage"] == "active"]
+	# 2️⃣ Si hay experiment_id, comprobar si quedan runs activos
+	if exp_id:
+		try:
+			out = subprocess.check_output(
+				["mlflow", "runs", "list", "--experiment-id", exp_id, "--format", "json"]
+			)
+			runs = json.loads(out)
+			active = [r for r in runs if r["info"]["lifecycle_stage"] == "active"]
 
-        if len(active) == 0:
-            print(f"[INFO] Eliminando experimento MLflow {exp_id} (vacío)")
-            subprocess.run(
-                ["mlflow", "experiments", "delete", "--experiment-id", exp_id],
-                check=False
-            )
-    except Exception as e:
-        print("[WARN] No se pudo verificar experimento MLflow:", e)
-EOF
+			if len(active) == 0:
+				print(f"[INFO] Eliminando experimento MLflow {exp_id} (vacío)")
+				subprocess.run(
+					["mlflow", "experiments", "delete", "--experiment-id", exp_id],
+					check=False
+				)
+		except Exception as e:
+			print("[WARN] No se pudo verificar experimento MLflow:", e)
+	EOF
 	fi
 
 	$(MAKE) remove-generic PHASE=$(PHASE5) VARIANTS_DIR=$(VARIANTS_DIR_05) VARIANT=$(VARIANT)
