@@ -224,4 +224,8 @@ param_rules:
       type: dict
       required: true
 
+    sample_size:
+      type: number
+      required: false
+
   

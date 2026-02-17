@@ -125,8 +125,8 @@ En executions/06_packaging/<VARIANT>/:
 
 ### Crear variante
 ```bash
-make variant6 VARIANT=v601 \
-  PARENTS_F05="v501 v502" 
+make variant6 VARIANT=v121 \
+  PARENTS_F05="v111 v112" 
 ```
 
 Ejemplo:

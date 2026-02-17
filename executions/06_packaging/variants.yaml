@@ -1,0 +1,6 @@
+variants:
+  v601:
+    created_at: '2026-02-16T21:48:08.989885+00:00'
+    params_path: /Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/06_packaging/v601/params.yaml
+    parent_variants_f05:
+    - v501

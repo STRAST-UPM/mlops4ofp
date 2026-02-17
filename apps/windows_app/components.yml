@@ -1,0 +1,54 @@
+# components.yml
+components:
+  Battery_Active_Power:
+    color: "#FF0000"
+    description: "Battery active power"
+  Battery_Active_Power_Set_Response:
+    color: "#CC0000"
+    description: "Battery active power set response"
+  PVPCS_Active_Power:
+    color: "#00FF00"
+    description: "PVPCS active power"
+  GE_Body_Active_Power:
+    color: "#0000FF"
+    description: "GE Body active power"
+    metrics:
+  GE_Active_Power:
+    color: "#FFA500"
+    description: "GE active power"
+  GE_Body_Active_Power_Set_Response:
+    color: "#FF8C00"
+    description: "GE Body active power set response"
+  FC_Active_Power_FC_END_Set:
+    color: "#800080"
+    description: "FC END set active power"
+  FC_Active_Power:
+    color: "#9932CC"
+    description: "FC active power"
+  FC_Active_Power_FC_end_Set_Response:
+    color: "#BA55D3"
+    description: "FC end set response active power"
+  Island_mode_MCCB_Active_Power:
+    color: "#008080"
+    description: "Island mode MCCB active power"
+  MG-LV-MSB_AC_Voltage:
+    color: "#A52A2A"
+    description: "MG-LV-MSB AC voltage"
+  Receiving_Point_AC_Voltage:
+    color: "#2F4F4F"
+    description: "Receiving Point AC voltage"
+  Island_mode_MCCB_AC_Voltage:
+    color: "#556B2F"
+    description: "Island mode MCCB AC voltage"
+  Island_mode_MCCB_Frequency:
+    color: "#4682B4"
+    description: "Island mode MCCB frequency"
+  MG-LV-MSB_Frequency:
+    color: "#B22222"
+    description: "MG-LV-MSB frequency"
+  Inlet_Temperature_of_Chilled_Water:
+    color: "#FF1493"
+    description: "Inlet temperature of chilled water"
+  Outlet_Temperature:
+    color: "#1E90FF"
+    description: "Outlet temperature"

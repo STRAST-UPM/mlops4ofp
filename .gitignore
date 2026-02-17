@@ -49,3 +49,9 @@ notebooks-old/*
 #.vscode/*
 *.log
 __pycache__/
+
+# Credentials
+setup/gdrive-credentials.json
+*.key
+*.pem
+*.p12

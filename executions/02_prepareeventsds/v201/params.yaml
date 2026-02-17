@@ -1,10 +1,8 @@
 band_thresholds_pct:
-- 10
-- 25
-- 50
-- 75
-- 90
+- 40
+- 60
+- 80
 event_strategy: transitions
 nan_handling: keep
 Tu: null
-parent_variant: v001
+parent_variant: v101

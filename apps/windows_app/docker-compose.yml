@@ -10,10 +10,10 @@ services:
       # - ./epoch_processed:/app/epoch_processed
       - ./files_output/queries:/app/output/
       - ./files_output/multi_requests_file.yml:/app/scripts/multi_requests_file.yml
-
+      - ./components.yml:/app/components.yml
     environment:
       SERVER_PORT: 8060
-      WINDOW_VERSION: "v001"
+      WINDOW_VERSION: "${WINDOW_VERSION:-v001}"
       OBS_EVENTS_COLUMN: "OW_events"
       PRED_EVENTS_COLUMN: "PW_events"
       # DATASET_RAW_PATH: "executions/03_preparewindowsds"

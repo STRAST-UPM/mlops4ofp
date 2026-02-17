@@ -98,24 +98,74 @@ def prepare_variant(variant: str):
     metadata_path = f06_root / "06_packaging_metadata.json"
     f06_metadata = json.loads(metadata_path.read_text())
 
+    models_dir = f06_root / "models"
+    datasets_dir = f06_root / "datasets"
+    
+    # Reconstruir lista de modelos desde params de F06
     models = []
-    for m in f06_metadata["models"]:
-        prediction_name = m["prediction_name"]
-        model_dir = next((f06_root / "models").glob(f"{prediction_name}__*"))
+    seen_datasets = set()
+    datasets = []
+    
+    parent_f05_list = params.get("parent_variants_f05", [])
+    if not parent_f05_list:
+        parent_f05_list = f06_metadata.get("parent_variants", [])
+    
+    for v05 in parent_f05_list:
+        # Leer params de F05 para obtener F04 y prediction_name
+        f05_params_path = project_root / "executions" / "05_modeling" / v05 / "params.yaml"
+        if not f05_params_path.exists():
+            print(f"[WARN] No se encontró params.yaml de F05 {v05}")
+            continue
+        
+        f05_params = yaml.safe_load(f05_params_path.read_text())
+        v04 = f05_params["parent_variant"]
+        
+        # Buscar el directorio del modelo en models/ (puede haber múltiples patrones)
+        # Buscar primero por model_summary.json para obtener prediction_name
+        model_dir_found = None
+        prediction_name = None
+        
+        for model_dir_path in models_dir.iterdir():
+            if not model_dir_path.is_dir():
+                continue
+            
+            summary_path = model_dir_path / "model_summary.json"
+            if not summary_path.exists():
+                continue
+            
+            summary = json.loads(summary_path.read_text())
+            # Verificar si este modelo corresponde a este F05
+            # (por ahora, asumimos que cada F05 tiene exactamente un modelo)
+            prediction_name = summary["prediction_name"]
+            model_dir_found = model_dir_path
+            break
+        
+        if not model_dir_found:
+            print(f"[WARN] No se encontró modelo para F05 {v05}")
+            continue
+        
+        dataset_path = datasets_dir / f"{v04}__dataset.parquet"
+        
         models.append({
             "prediction_name": prediction_name,
-            "model_dir": str(model_dir),
+            "source_f05": v05,
+            "source_f04": v04,
+            "model_dir": str(model_dir_found),
             "model_h5": "model.h5",
-            "model_summary": "model_summary.json"
-        })
-
-    datasets = []
-    for d in f06_metadata["datasets"]:
-        datasets.append({
-            "dataset_path": d,
+            "model_summary": "model_summary.json",
+            "dataset_path": str(dataset_path),
             "x_column": "OW_events",
-            "y_column": "label"
+            "y_column": "label",
         })
+        
+        if str(dataset_path) not in seen_datasets:
+            datasets.append({
+                "dataset_path": str(dataset_path),
+                "x_column": "OW_events",
+                "y_column": "label",
+                "source_f04": v04,
+            })
+            seen_datasets.add(str(dataset_path))
 
     manifest = {
         "f06_variant": parent_f06,
@@ -181,6 +231,10 @@ def run_server(variant: str):
 
         raise ValueError("Vectorization no soportada")
 
+    @app.route("/", methods=["GET"])
+    def health():
+        return jsonify({"status": "ready", "models": len(loaded_models)})
+
     @app.route("/infer", methods=["POST"])
     def infer():
         window = request.json["window"]
@@ -226,6 +280,13 @@ def run_orchestrator(variant: str):
     variant_root = pm.current_variant_dir()
 
     manifest = load_manifest(variant_root)
+    
+    # Cargar parámetros
+    import yaml
+    with open(variant_root / "params.yaml", "r") as f:
+        params = yaml.safe_load(f)
+    
+    sample_size = params.get("sample_size", None)
 
     runtime_dir = variant_root / "runtime"
     logs_dir = variant_root / "logs"
@@ -239,18 +300,49 @@ def run_orchestrator(variant: str):
     ensure_clean_dir(report_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
+    # Iniciar servidor
     server_proc = subprocess.Popen(
-        [sys.executable, __file__, "--variant", variant, "--mode", "server"]
+        [sys.executable, __file__, "--variant", variant, "--mode", "server"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
     )
-    time.sleep(2)
+    
+    # Esperar a que el servidor esté listo (healthcheck)
+    import time
+    max_retries = 20
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get("http://127.0.0.1:5005/", timeout=0.5)
+            break
+        except:
+            if attempt == max_retries - 1:
+                server_proc.kill()
+                raise RuntimeError("Servidor Flask no respondió después de 10s")
+            time.sleep(0.5)
 
     raw_rows = []
 
     for dataset in manifest["datasets"]:
         df = pd.read_parquet(dataset["dataset_path"])
+        
+        # Aplicar límite de muestra si está definido
+        if sample_size is not None:
+            print(f"[INFO] Limitando dataset a {sample_size} filas (de {len(df)} totales)")
+            df = df.head(sample_size)
+        else:
+            print(f"[INFO] Procesando {len(df)} ventanas completas")
 
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            if idx % 100 == 0:
+                print(f"[PROGRESS] Procesadas {idx}/{len(df)} ventanas...")
+            
             window = row[dataset["x_column"]]
+            # Convertir a lista Python si es ndarray
+            if hasattr(window, 'tolist'):
+                window = window.tolist()
+            elif not isinstance(window, list):
+                window = list(window)
+            
             resp = requests.post(
                 "http://127.0.0.1:5005/infer",
                 json={"window": window}
@@ -267,9 +359,15 @@ def run_orchestrator(variant: str):
     raw_df = pd.DataFrame(raw_rows)
     raw_df.to_parquet(logs_dir / "raw_predictions.parquet", index=False)
     raw_df.to_csv(logs_dir / "raw_predictions.csv", index=False)
+    
+    print(f"[OK] {len(raw_df)} predicciones guardadas")
 
-    requests.post("http://127.0.0.1:5005/control", json={"cmd": "shutdown"})
-    server_proc.wait()
+    # Terminar servidor
+    server_proc.terminate()
+    try:
+        server_proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        server_proc.kill()
 
     # ------------------------------------------------------------
     # Postprocess métricas
@@ -285,12 +383,31 @@ def run_orchestrator(variant: str):
         )
 
         df = pd.read_parquet(dataset_path)
+        
+        # Aplicar sample_size también para métricas
+        if sample_size is not None:
+            df = df.head(sample_size)
+        
         model_log = raw_df[raw_df["prediction_name"] == pred_name]
 
         tp = tn = fp = fn = 0
+        
+        print(f"[INFO] Calculando métricas para {pred_name} ({len(df)} ventanas)...")
 
-        for _, row in df.iterrows():
-            window = json.dumps(row["OW_events"])
+        for idx, row in df.iterrows():
+            if idx % 10 == 0:
+                print(f"[METRICS] Procesadas {idx}/{len(df)} ventanas para métricas...")
+            
+            window_raw = row["OW_events"]
+            # Convertir a lista si es ndarray
+            if hasattr(window_raw, 'tolist'):
+                window_list = window_raw.tolist()
+            elif not isinstance(window_raw, list):
+                window_list = list(window_raw)
+            else:
+                window_list = window_raw
+            
+            window = json.dumps(window_list)
             y_true = row["label"]
 
             match = model_log[model_log["window"] == window]

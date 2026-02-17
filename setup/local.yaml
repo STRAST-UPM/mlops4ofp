@@ -1,18 +1,6 @@
 # ============================================================
 # MLOps4OFP — Configuración de Setup MODO LOCAL
 # ============================================================
-#
-# Configuración completa para trabajar en local sin remotes.
-# Ideal para:
-#   - Desarrollo local
-#   - Clase/laboratorio sin sincronización remota
-#   - Flujos de trabajo independientes
-#
-# Uso:
-#   make setup SETUP_CFG=setup/local.yaml
-#   make check-setup
-#
-# ============================================================
 
 # ------------------------------------------------------------
 # GIT — Control de versiones del código
@@ -20,71 +8,19 @@
 git:
   # mode: none
   # Trabaja solo con Git local, sin remoto.
-  #
-  # Si el repo local no existe, será necesario:
-  #   git init
-  #   git config user.name "Tu Nombre"
-  #   git config user.email "tu@email.com"
-  #   git add -A
-  #   git commit -m "Initial commit"
-  #
   mode: none
-
-  # remote_url:
-  # No hay remoto para modo local
-  #
-  # remote_url: (vacío)
-
 
 # ------------------------------------------------------------
 # DVC — Backend de almacenamiento de datasets y artefactos
 # ============================================================
 dvc:
-  # backend: local
-  # Almacenamiento en filesystem local (.dvc_storage)
-  #
   backend: local
-
-  # path:
-  # Carpeta donde DVC almacenará los datos.
-  # Se crea automáticamente si no existe.
-  #
-  # LOCAL (recomendado): ./.dvc_storage
-  #
   path: ./.dvc_storage
-
 
 # ------------------------------------------------------------
 # MLFLOW — Tracking de experimentos
 # ============================================================
 mlflow:
-  # enabled: true
-  # MLflow está activo, se usará para tracking de experimentos.
-  #
   enabled: true
-
-  # backend: local
-  # Almacenamiento local de MLflow (./mlruns)
-  #
   backend: local
-
-  # tracking_uri:
-  # URI estándar para las fases del pipeline.
-  #
-  # LOCAL (recomendado): file:./mlruns
-  #
   tracking_uri: file:./mlruns
-
-
-# ============================================================
-# FIN DEL FICHERO
-# ============================================================
-#
-# VALIDACIÓN:
-#   make check-setup
-#
-# Si la validación falla, revisa que:
-#   - El repo Git está inicializado (git init)
-#   - Tienes permisos de escritura en la carpeta del proyecto
-#
-# ============================================================
