@@ -30,13 +30,15 @@ def run(cmd, cwd=ROOT):
 def find_python_311():
     candidates = [
         "python3.11",
+        "python",
         "/usr/local/bin/python3.11",
         "/opt/homebrew/bin/python3.11",
     ]
     for c in candidates:
-        path = shutil.which(c)
+        path = shutil.which(c) 
         if path:
             return path
+    print("[ERROR] No se encontró python3.11 en el sistema.")
     return None
 
 
@@ -59,10 +61,15 @@ def ensure_venv():
     print(f"[INFO] Usando Python 3.11: {python311}")
     run([python311, "-m", "venv", str(VENV)])
 
-    pip = VENV / "bin" / "pip"
-    python = VENV / "bin" / "python"
+    pip = VENV / "Scripts" / "pip.exe" if sys.platform == 'win32' else VENV / "bin" / "pip"
+    python = VENV / "Scripts" / "python.exe" if sys.platform == 'win32' else VENV / "bin" / "python"
 
-    run([str(pip), "install", "--upgrade", "pip"])
+
+    try:
+        run([str(pip), "install", "--upgrade", "pip"])
+    except subprocess.CalledProcessError:
+        print("[INFO] Pip ya está actualizado o no es necesario actualizar.")
+
 
     req = ROOT / "requirements.txt"
     if not req.exists():
@@ -81,14 +88,16 @@ def ensure_venv():
 
 def ensure_running_in_venv(config_path):
 
-    venv_python = VENV / "bin" / "python"
+    venv_python = VENV / "Scripts" / "python.exe" if sys.platform == 'win32' else VENV / "bin" / "python"
 
+     # Verifica si el script está siendo ejecutado dentro del entorno virtual
     if Path(sys.executable).resolve() != venv_python.resolve():
         print("[INFO] Reejecutando dentro de .venv")
-        subprocess.run(
-            [str(venv_python), __file__, "--config", config_path],
-            check=True,
-        )
+        try:
+            subprocess.run([str(venv_python), __file__, "--config", config_path], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] El comando falló con el siguiente error: {e}")
+            sys.exit(1)
         sys.exit(0)
 
 
@@ -153,7 +162,7 @@ def add_or_update_dvc_remote(venv_python, name, url):
 
 def setup_dvc(cfg):
 
-    venv_python = VENV / "bin" / "python"
+    venv_python = VENV / "Scripts" / "python.exe" if sys.platform == 'win32' else VENV / "bin" / "python"
 
     if not (ROOT / ".dvc").exists():
         print("[INFO] Inicializando DVC")
