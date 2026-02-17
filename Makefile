@@ -76,6 +76,42 @@ check-setup:
 	@echo "==> Verificando configuración del proyecto"
 	@.venv/bin/python setup/check_setup.py
 
+clean-setup:
+	@echo "==> Eliminando MLflow asociado al proyecto (si existe)"
+	@echo "import yaml, pathlib, subprocess, os, shutil, json, sys" > clean_setup.py
+	@echo "cfg_path = pathlib.Path('.mlops4ofp/setup.yaml')" >> clean_setup.py
+	@echo "if not cfg_path.exists():" >> clean_setup.py
+	@echo "    sys.exit(0)" >> clean_setup.py
+	@echo "cfg = yaml.safe_load(cfg_path.read_text())" >> clean_setup.py
+	@echo "ml = cfg.get('mlflow', {})" >> clean_setup.py
+	@echo "if not ml.get('enabled', False):" >> clean_setup.py
+	@echo "    sys.exit(0)" >> clean_setup.py
+	@echo "uri = ml.get('tracking_uri', '')" >> clean_setup.py
+	@echo "if uri.startswith('file:'):" >> clean_setup.py
+	@echo "    path = uri.replace('file:', '')" >> clean_setup.py
+	@echo "    if os.path.exists(path):" >> clean_setup.py
+	@echo "        print(f'[INFO] Eliminando MLflow local en {path}')" >> clean_setup.py
+	@echo "        shutil.rmtree(path)" >> clean_setup.py
+	@echo "else:" >> clean_setup.py
+	@echo "    print('[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)')" >> clean_setup.py
+	@echo "    try:" >> clean_setup.py
+	@echo "        out = subprocess.check_output(['mlflow', 'experiments', 'list', '--format', 'json'])" >> clean_setup.py
+	@echo "        experiments = json.loads(out)" >> clean_setup.py
+	@echo "        for exp in experiments:" >> clean_setup.py
+	@echo "            name = exp.get('name', '')" >> clean_setup.py
+	@echo "            exp_id = exp.get('experiment_id')" >> clean_setup.py
+	@echo "            if name.startswith('F05_') and exp_id:" >> clean_setup.py
+	@echo "                print(f'[INFO] Eliminando experimento remoto {name}')" >> clean_setup.py
+	@echo "                subprocess.run(['mlflow', 'experiments', 'delete', '--experiment-id', exp_id], check=False)" >> clean_setup.py
+	@echo "    except Exception as e:" >> clean_setup.py
+	@echo "        print('[WARN] No se pudo limpiar MLflow remoto:', e)" >> clean_setup.py
+
+	@$(PYTHON) clean_setup.py  # Ejecuta el script Python creado temporalmente
+
+	@echo "==> Eliminando entorno completo del proyecto ML"
+	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv executions
+	@echo "[OK] Proyecto ML reinicializado. Ejecuta 'make setup' para reconstruir estructura base."
+	@rm clean_setup.py  # Elimina el archivo temporal después de la ejecución
 
 
 ############################################
