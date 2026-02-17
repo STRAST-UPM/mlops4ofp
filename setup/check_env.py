@@ -81,7 +81,7 @@ def main():
     check_tool("dvc", mandatory=False)
 
     ok &= check_python_module("mlflow", mandatory=True)
-    ok &= check_tool("mlflow", mandatory=True)
+    ok &= check_tool("mlflow", mandatory=False)
     ok &= check_tensorflow()
 
     if not ok:

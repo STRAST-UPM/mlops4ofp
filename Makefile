@@ -9,14 +9,20 @@ SHELL := /bin/bash
 # PYTHON (estable)
 ############################################
 
-PYTHON ?= python3.11
+
+ifeq ($(OS),Windows_NT)
+PYTHON_LOCAL ?= python
+else
+PYTHON_LOCAL ?= python3.11
+endif
+
 
 # Verificar que existe python3.11
-ifeq ($(shell command -v $(PYTHON) 2>/dev/null),)
+ifeq ($(shell command -v $(PYTHON_LOCAL) 2>/dev/null),)
 $(error python3.11 no encontrado en el sistema. Instálalo antes de ejecutar make setup)
 endif
 
-$(info [INFO] Usando intérprete Python: $(PYTHON))
+$(info [INFO] Usando interprete Python en local: $(PYTHON_LOCAL))
 
 ############################################
 # CARGA AUTOMÁTICA DE VARIABLES DE ENTORNO
@@ -69,18 +75,19 @@ setup:
 ifndef SETUP_CFG
 	$(error Debes especificar SETUP_CFG=<fichero.yaml> (ej: setup/local.yaml o setup/remote.yaml))
 endif
-	@$(PYTHON) $(SETUP_PY) --config $(SETUP_CFG)
+	@$(PYTHON_LOCAL) -m pip install pyyaml==6.0.1
+	@$(PYTHON_LOCAL) $(SETUP_PY) --config $(SETUP_CFG)
 
 
 check-setup:
 	@echo "==> Verificando entorno base"
-	@.venv/bin/python setup/check_env.py
+	@$(PYTHON) setup/check_env.py
 	@echo "==> Verificando configuración del proyecto"
-	@.venv/bin/python setup/check_setup.py
+	@$(PYTHON) setup/check_setup.py
 
 clean-setup:
 	@echo "==> Eliminando MLflow asociado al proyecto (si existe)"
-	@$(PYTHON) -c 'import yaml,pathlib,subprocess,os,shutil,json,sys;cfg_path=pathlib.Path(".mlops4ofp/setup.yaml");sys.exit(0) if not cfg_path.exists() else None;cfg=yaml.safe_load(cfg_path.read_text());ml=cfg.get("mlflow",{});sys.exit(0) if not ml.get("enabled",False) else None;uri=ml.get("tracking_uri","");(print(f"[INFO] Eliminando MLflow local en {path}") or shutil.rmtree(path)) if uri.startswith("file:") and os.path.exists(path:=uri.replace("file:","")) else (print("[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)") or [print(f"[INFO] Eliminando experimento remoto {exp.get(\"name\",\"\")}") or subprocess.run(["mlflow","experiments","delete","--experiment-id",exp.get("experiment_id")],check=False) for exp in (experiments:=json.loads(subprocess.check_output(["mlflow","experiments","list","--format","json"]))) if exp.get("name","").startswith("F05_") and exp.get("experiment_id")] if True else None) if uri else None' 2>/dev/null || true
+	@$(PYTHON_LOCAL) -c 'import yaml,pathlib,subprocess,os,shutil,json,sys;cfg_path=pathlib.Path(".mlops4ofp/setup.yaml");sys.exit(0) if not cfg_path.exists() else None;cfg=yaml.safe_load(cfg_path.read_text());ml=cfg.get("mlflow",{});sys.exit(0) if not ml.get("enabled",False) else None;uri=ml.get("tracking_uri","");(print(f"[INFO] Eliminando MLflow local en {path}") or shutil.rmtree(path)) if uri.startswith("file:") and os.path.exists(path:=uri.replace("file:","")) else (print("[INFO] MLflow remoto detectado: eliminando experimentos del proyecto (prefijo F05_)") or [print(f"[INFO] Eliminando experimento remoto {exp.get(\"name\",\"\")}") or subprocess.run(["mlflow","experiments","delete","--experiment-id",exp.get("experiment_id")],check=False) for exp in (experiments:=json.loads(subprocess.check_output(["mlflow","experiments","list","--format","json"]))) if exp.get("name","").startswith("F05_") and exp.get("experiment_id")] if True else None) if uri else None' 2>/dev/null || true
 	@echo "==> Eliminando entorno completo del proyecto ML"
 	@rm -rf .mlops4ofp .dvc .dvc_storage local_dvc_store .venv executions
 	@echo "[OK] Proyecto ML reinicializado. Ejecuta 'make setup' para reconstruir estructura base."
@@ -107,7 +114,7 @@ JUPYTER := jupyter
 endif
 endif
 
-$(info [INFO] Usando intérprete Python: $(PYTHON))
+$(info [INFO] Usando interprete Python en venv: $(PYTHON))
 
 ############################################
 # Objetivos genéricos por fase (reutilizables)
