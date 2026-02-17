@@ -59,13 +59,14 @@ Windows:
 
 ## Herramientas requeridas
 
-Obligatorias:
-- git
-- python 3.11
-- make
-- dvc
+| Herramienta | Estado |
+|-------------|--------|
+| git | Obligatorio |
+| Python 3.11 | Obligatorio |
+| make | Obligatorio |
+| dvc | Obligatorio |
 
-### Verificar instalacion
+**Verificar instalación:**
 ```bash
 git --version
 python --version
@@ -136,33 +137,25 @@ Requisitos:
 
 ## Que genera el setup
 
-- .venv/ con dependencias
-- .mlops4ofp/setup.yaml (configuracion activa)
-- .mlops4ofp/env.sh (si MLflow esta habilitado)
-
-Si existe .mlops4ofp/env.sh, el Makefile lo incluye automaticamente.
+- `.venv/` con dependencias instaladas
+- `.mlops4ofp/setup.yaml` (configuración activa)
+- `.mlops4ofp/env.sh` (si MLflow está habilitado; importado automáticamente por Makefile)
 
 ---
 
-## Comandos utiles
+## Comandos útiles
 
-make check-setup
-make clean-setup
+```bash
+make check-setup        # Validar setup actual
+make clean-setup        # Limpiar completamente (.venv, .mlops4ofp, DVC local)
+```
 
-Elimina completamente:
-- .venv
-- .mlops4ofp
-- configuracion DVC local
-- storage local
-
-El proyecto vuelve exactamente al estado post-clone.
+`make clean-setup` devuelve el proyecto al estado post-clone. Úsalo antes de reintentar `make setup` si hay errores.
 
 ---
 
-## Notas finales
+## Recomendaciones importantes
 
-El proyecto no intenta "arreglar" el entorno automaticamente.
-Prefiere:
-- validaciones explicitas
-- fallos tempranos
-- contratos claros
+- **Windows:** Ejecuta en Git Bash o Git CMD
+- **Errores en setup:** Ejecuta `make clean-setup` antes de reintentar
+- El proyecto valida explícitamente en lugar de "arreglar" automáticamente
