@@ -34,6 +34,17 @@ def find_python_311():
         "/usr/local/bin/python3.11",
         "/opt/homebrew/bin/python3.11",
     ]
+    
+    # En Windows, agregar más candidatos comunes
+    if sys.platform == 'win32':
+        candidates = [
+            "python",
+            "py",  # Launcher de Python en Windows
+            "python3",
+            r"C:\Python311\python.exe",
+            r"C:\ProgramData\chocolatey\bin\python3.11.EXE",
+        ] + candidates
+    
     for c in candidates:
         path = shutil.which(c) 
         if path:
@@ -59,7 +70,20 @@ def ensure_venv():
         )
 
     print(f"[INFO] Usando Python 3.11: {python311}")
-    run([python311, "-m", "venv", str(VENV)])
+    
+    # En Windows, usar manejo más robusto debido a problemas con subprocess.run
+    if sys.platform == 'win32':
+        venv_cmd = [python311, "-m", "venv", str(VENV)]
+        print("[CMD]", " ".join(venv_cmd))
+        result = subprocess.run(venv_cmd, cwd=ROOT, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("[ERROR] Salida:")
+            print(result.stdout)
+            print(result.stderr)
+            abort(f"Falló creación del venv (código {result.returncode})")
+    else:
+        # macOS/Linux: usar el método original que ya funciona
+        run([python311, "-m", "venv", str(VENV)])
 
     pip = VENV / "Scripts" / "pip.exe" if sys.platform == 'win32' else VENV / "bin" / "pip"
     python = VENV / "Scripts" / "python.exe" if sys.platform == 'win32' else VENV / "bin" / "python"
