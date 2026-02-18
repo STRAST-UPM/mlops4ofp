@@ -161,23 +161,81 @@ def main(variant: str):
         f04_to_f03[v04] = v03
 
     # Validación fuerte: mismo régimen temporal
-    regimes = set()
+    temporal_by_f03 = {}
+
+    f03_registry_path = (
+        project_root / "executions" / "03_preparewindowsds" / "variants.yaml"
+    )
+    f03_registry = {}
+    if f03_registry_path.exists():
+        f03_registry = yaml.safe_load(f03_registry_path.read_text()) or {}
+        f03_registry = f03_registry.get("variants", {}) or {}
 
     for v03 in lineage["f03"]:
         p = project_root / "executions" / "03_preparewindowsds" / v03 / "params.yaml"
         f03_params = yaml.safe_load(p.read_text())
-
-        regime = (
-            f03_params.get("Tu"),
-            f03_params.get("OW"),
-            f03_params.get("PW"),
+        f03_metadata_path = (
+            project_root
+            / "executions"
+            / "03_preparewindowsds"
+            / v03
+            / "03_preparewindowsds_metadata.json"
         )
-        regimes.add(regime)
+        tu_value = None
+        if f03_metadata_path.exists():
+            f03_metadata = json.loads(f03_metadata_path.read_text())
+            tu_value = f03_metadata.get("Tu")
+        if tu_value is None:
+            tu_value = f03_params.get("Tu")
 
-    if len(regimes) != 1:
+        created_at_raw = (f03_registry.get(v03, {}) or {}).get("created_at")
+        created_at_dt = datetime.min.replace(tzinfo=timezone.utc)
+        if created_at_raw:
+            created_at_dt = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
+
+        temporal_by_f03[v03] = {
+            "Tu": tu_value,
+            "OW": f03_params.get("OW"),
+            "PW": f03_params.get("PW"),
+            "LT": f03_params.get("LT"),
+            "created_at": created_at_dt,
+        }
+
+    ow_values = {t["OW"] for t in temporal_by_f03.values()}
+    pw_values = {t["PW"] for t in temporal_by_f03.values()}
+    lt_values = {t["LT"] for t in temporal_by_f03.values()}
+
+    if len(ow_values) != 1 or len(pw_values) != 1 or len(lt_values) != 1:
         raise RuntimeError(
-            f"Las variantes F05 no comparten el mismo régimen temporal: {regimes}"
+            "Las variantes F05 no comparten el mismo régimen temporal (OW, PW, LT): "
+            f"{temporal_by_f03}"
         )
+
+    ordered_f03 = sorted(
+        temporal_by_f03.items(),
+        key=lambda x: x[1]["created_at"],
+        reverse=True,
+    )
+
+    tu_value = None
+    for _v03, temporal_data in ordered_f03:
+        if temporal_data["Tu"] is not None:
+            tu_value = temporal_data["Tu"]
+            break
+
+    if tu_value is None:
+        tu_value = ordered_f03[0][1]["Tu"]
+
+    resolved_temporal = {
+        "Tu": tu_value,
+        "OW": next(iter(ow_values)),
+        "PW": next(iter(pw_values)),
+        "LT": next(iter(lt_values)),
+    }
+
+    params["temporal"] = resolved_temporal
+    with open(variant_root / "params.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(params, f, sort_keys=False)
 
     print("[INFO] Linaje resuelto:")
     print(json.dumps({k: sorted(v) for k, v in lineage.items()}, indent=2))
@@ -191,8 +249,26 @@ def main(variant: str):
         p = project_root / "executions" / "04_targetengineering" / v04 / "params.yaml"
         f04_params = yaml.safe_load(p.read_text())
 
+        prediction_name = f04_params.get("prediction_name")
+        if not prediction_name:
+            metadata_path = (
+                project_root
+                / "executions"
+                / "04_targetengineering"
+                / v04
+                / "04_targetengineering_metadata.json"
+            )
+            if metadata_path.exists():
+                f04_metadata = json.loads(metadata_path.read_text())
+                prediction_name = f04_metadata.get("params", {}).get("prediction_name")
+
+        if not prediction_name:
+            raise RuntimeError(
+                f"No se pudo resolver prediction_name para F04 {v04} desde params/metadata"
+            )
+
         objectives[v04] = {
-            "expression": f04_params.get("target_expression"),
+            "prediction_name": prediction_name,
         }
 
     objectives_path = variant_root / "objectives.json"
@@ -275,7 +351,7 @@ def main(variant: str):
         "variant": variant,
         "git_commit": get_git_hash(),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "temporal": regimes.pop(),
+        "temporal": resolved_temporal,
         "lineage": {k: sorted(v) for k, v in lineage.items()},
         "models": selected_models,
         "objectives": list(objectives.keys()),

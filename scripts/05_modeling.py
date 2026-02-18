@@ -130,6 +130,8 @@ def pad_sequences(seqs, max_len, pad_value=0):
     out = np.full((len(seqs), max_len), pad_value, dtype=np.int32)
     for i, s in enumerate(seqs):
         trunc = s[-max_len:]
+        if len(trunc) == 0:
+            continue
         out[i, -len(trunc):] = trunc
     return out
 
@@ -179,7 +181,8 @@ def vectorize_sequence(df):
     index = {ev: i + 1 for i, ev in enumerate(vocab)}
 
     seqs_idx = [[index[e] for e in s] for s in sequences]
-    max_len = int(np.percentile([len(s) for s in seqs_idx], 95))
+    lengths = [len(s) for s in seqs_idx]
+    max_len = max(1, int(np.percentile(lengths, 95))) if lengths else 1
     X = pad_sequences(seqs_idx, max_len)
 
     return X, y, {

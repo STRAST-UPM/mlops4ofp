@@ -1,0 +1,11 @@
+parent_variants_f05:
+- v501
+- v502
+- v503
+- v504
+temporal:
+  Tu: 10.0
+  OW: 600
+  PW: 100
+  LT: 100
+notes: null

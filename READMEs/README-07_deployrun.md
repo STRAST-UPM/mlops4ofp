@@ -177,15 +177,23 @@ Las métricas se calculan únicamente sobre ventanas con referencia en su datase
 
 ---
 
-## 7. Dependencias
+## 7. Batch inference
 
-Añadir a `requirements.txt`:
+F07 utiliza inferencia por lotes (batch) para mejorar el rendimiento.
 
+El tamaño del lote se controla mediante:
+
+```yaml
+batch_size: 256
 ```
-flask>=2.2
-requests>=2.28
-matplotlib>=3.7
-```
+
+Si no se especifica, usa 256 por defecto. 
+
+El servidor expone dos endpoints:
+- POST /infer ventana individual (debug)
+- POST /infer_batch lote de ventanas
+
+El pipeline usa siempre /infer_batch.
 
 ---
 

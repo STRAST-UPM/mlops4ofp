@@ -337,6 +337,7 @@ variant1: check-variant-format
 	@$(if $(strip $(NAN_VALUES)),$(eval SET_LIST += --set nan_values='$(NAN_VALUES)'))
 	@$(if $(strip $(ERROR_VALUES)),$(eval SET_LIST += --set error_values_by_column='$(ERROR_VALUES)'))
 	@$(if $(strip $(MAX_LINES)),$(eval SET_LIST += --set max_lines='$(MAX_LINES)'))
+	@$(if $(strip $(MAX_LINE)),$(eval SET_LIST += --set max_line='$(MAX_LINE)'))
 	@$(if $(strip $(FIRST_LINE)),$(eval SET_LIST += --set first_line='$(FIRST_LINE)'))
 	@$(MAKE) variant-generic PHASE=$(PHASE1) VARIANT=$(VARIANT) RAW=$(RAW) EXTRA_SET_FLAGS="$(SET_LIST)"
 
@@ -1333,15 +1334,20 @@ SCRIPT_07 := scripts/07_deployrun.py
 NOTEBOOK_07 := notebooks/07_deployrun.ipynb
 
 variant7: check-variant-format
-ifndef PARENT
-	$(error Debes especificar PARENT=vNNN (variante F06))
-endif
-	@echo "==> Creando variante F07: $(VARIANT) (parent F06: $(PARENT))"
+	@test -n "$(PARENT)" || (echo "[ERROR] Debes especificar PARENT=vNNN (variante F06)"; exit 1)
+	@echo "==> Creando variante $(PHASE7):$(VARIANT) (parent F06: $(PARENT))"
 
-	$(PYTHON) mlops4ofp/tools/params_manager.py create-variant \
-		--phase $(PHASE7) \
-		--variant $(VARIANT) \
-		--set parent_variant_f06=$(PARENT)
+	@$(eval SET_LIST := \
+		--set parent_variant_f06=$(PARENT) )
+
+	# ---------------------------------------------
+	# Overrides opcionales (sin fallar si no vienen)
+	# ---------------------------------------------
+	@$(if $(strip $(BATCH_SIZE)),$(eval SET_LIST += --set batch_size=$(BATCH_SIZE)))
+	@$(if $(strip $(HOST)),$(eval SET_LIST += --set runtime.host='$(HOST)'))
+	@$(if $(strip $(PORT)),$(eval SET_LIST += --set runtime.port=$(PORT)))
+
+	@$(MAKE) variant-generic PHASE=$(PHASE7) VARIANT=$(VARIANT) EXTRA_SET_FLAGS="$(SET_LIST)"
 
 	@echo "==> Generando manifest.json"
 	$(PYTHON) $(SCRIPT_07) --variant $(VARIANT) --mode prepare
@@ -1380,6 +1386,9 @@ remove7: check-variant-format
 	$(PYTHON) mlops4ofp/tools/traceability.py can-delete \
 		--phase $(PHASE7) \
 		--variant $(VARIANT)
+
+	@echo "==> Eliminando seguimiento DVC (si existe)"
+	-dvc remove $(VARIANTS_DIR_07)/$(VARIANT).dvc || true
 
 	@echo "==> Eliminando carpeta completa de la variante"
 	rm -rf $(VARIANTS_DIR_07)/$(VARIANT)

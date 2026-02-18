@@ -252,6 +252,42 @@ def run_server(variant: str):
 
         return jsonify({"window": window, "results": results})
 
+    @app.route("/infer_batch", methods=["POST"])
+    def infer_batch():
+        windows = request.json["windows"]
+
+        batch_results = []
+
+        for m in loaded_models:
+
+            # Vectorizar todo el batch para este modelo
+            X_list = []
+
+            for window in windows:
+                X = vectorize(window, m["vectorization"])
+                X_list.append(X)
+
+            X_batch = np.vstack(X_list)
+
+            y_probs = m["model"].predict(X_batch, verbose=0).flatten()
+            y_preds = (y_probs >= m["threshold"]).astype(int)
+
+            for i, window in enumerate(windows):
+
+                if len(batch_results) <= i:
+                    batch_results.append({
+                        "window": window,
+                        "results": []
+                    })
+
+                batch_results[i]["results"].append({
+                    "prediction_name": m["prediction_name"],
+                    "y_pred": int(y_preds[i])
+                })
+
+        return jsonify({"results": batch_results})
+
+
     @app.route("/control", methods=["POST"])
     def control():
         if request.json.get("cmd") == "shutdown":
@@ -287,6 +323,7 @@ def run_orchestrator(variant: str):
         params = yaml.safe_load(f)
     
     sample_size = params.get("sample_size", None)
+    batch_size = params.get("batch_size", 256)
 
     runtime_dir = variant_root / "runtime"
     logs_dir = variant_root / "logs"
@@ -332,29 +369,58 @@ def run_orchestrator(variant: str):
         else:
             print(f"[INFO] Procesando {len(df)} ventanas completas")
 
-        for idx, row in df.iterrows():
-            if idx % 100 == 0:
-                print(f"[PROGRESS] Procesadas {idx}/{len(df)} ventanas...")
-            
-            window = row[dataset["x_column"]]
-            # Convertir a lista Python si es ndarray
-            if hasattr(window, 'tolist'):
-                window = window.tolist()
-            elif not isinstance(window, list):
-                window = list(window)
-            
+        windows_buffer = []
+
+    for idx, row in df.iterrows():
+
+        window = row[dataset["x_column"]]
+
+        if hasattr(window, 'tolist'):
+            window = window.tolist()
+        elif not isinstance(window, list):
+            window = list(window)
+
+        windows_buffer.append(window)
+
+        if len(windows_buffer) == batch_size:
+
             resp = requests.post(
-                "http://127.0.0.1:5005/infer",
-                json={"window": window}
+                "http://127.0.0.1:5005/infer_batch",
+                json={"windows": windows_buffer}
             )
+
             data = resp.json()
 
-            for r in data["results"]:
+            for item in data["results"]:
+                window_json = json.dumps(item["window"])
+                for r in item["results"]:
+                    raw_rows.append({
+                        "window": window_json,
+                        "prediction_name": r["prediction_name"],
+                        "y_pred": r["y_pred"]
+                    })
+
+            windows_buffer = []
+
+    # Procesar último bloque
+    if windows_buffer:
+
+        resp = requests.post(
+            "http://127.0.0.1:5005/infer_batch",
+            json={"windows": windows_buffer}
+        )
+
+        data = resp.json()
+
+        for item in data["results"]:
+            window_json = json.dumps(item["window"])
+            for r in item["results"]:
                 raw_rows.append({
-                    "window": json.dumps(window),
+                    "window": window_json,
                     "prediction_name": r["prediction_name"],
                     "y_pred": r["y_pred"]
                 })
+
 
     raw_df = pd.DataFrame(raw_rows)
     raw_df.to_parquet(logs_dir / "raw_predictions.parquet", index=False)

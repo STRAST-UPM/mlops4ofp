@@ -37,7 +37,8 @@ F06 no construye replay ni selecciona modelos manualmente.
   - `executions/06_packaging/<VARIANT>/`
 - Paquete resultante:
   - `executions/06_packaging/<VARIANT>/models/`
-  - `executions/06_packaging/<VARIANT>/replay/`
+  - `executions/06_packaging/<VARIANT>/datasets/`
+  - `executions/06_packaging/<VARIANT>/objectives.json`
 
 ---
 
@@ -46,7 +47,7 @@ Para ejecutar la Fase 06 necesitas:
 - **Una o más variantes válidas de la Fase 05** (modelos entrenados).
 - Todas las variantes F05 deben:
   - derivar de objetivos F04 compatibles,
-- compartir el mismo régimen temporal (Tu, OW, PW).
+- compartir el mismo régimen temporal (OW, PW, LT).
 
 Cada variante F06 puede combinar **múltiples variantes F05**.
 
@@ -82,10 +83,17 @@ temporal:
   Tu: <int|null>
   OW: <int|null>
   PW: <int|null>
+  LT: <int|null>
 ```
 
 - Si no se especifican al crear la variante, se **heredan de F03**
   (vía F05 → F04 → F03).
+- Durante la ejecución, F06 resuelve el régimen temporal común y lo deja
+  persistido en `params.yaml` y en `06_packaging_metadata.json`.
+- `Tu` se toma de `03_preparewindowsds_metadata.json` del parent F03 más
+  reciente entre los involucrados (priorizando valor no nulo).
+- Si faltase `Tu` en metadata, F06 usa fallback a `params.yaml` de F03.
+- Si no existe ninguno, queda `null`.
 
 ---
 
@@ -103,7 +111,11 @@ En executions/06_packaging/<VARIANT>/:
   Copia del dataset etiquetado de cada F04 asociado.
 
 - objectives.json
-  Expresiones formales de los objetivos F04.
+  Mapa por variante F04 con:
+  - `prediction_name`: nombre funcional del objetivo del parent F04.
+  F06 lo lee desde `executions/04_targetengineering/<v04>/params.yaml`
+  y, si faltase, usa fallback a
+  `executions/04_targetengineering/<v04>/04_targetengineering_metadata.json`.
 
 - 06_packaging_metadata.json
   Metadata consolidada:

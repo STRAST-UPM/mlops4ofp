@@ -144,8 +144,12 @@ def main():
     params_path = ctx["variant_root"] / "params.yaml"
     with open(params_path, "r", encoding="utf-8") as f:
         params = yaml.safe_load(f) or {}
+    original_params = dict(params)
 
     validate_params(PHASE, params, project_root)
+    if params != original_params:
+        with open(params_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(params, f, sort_keys=False)
     ctx["variant_params"] = params
 
 

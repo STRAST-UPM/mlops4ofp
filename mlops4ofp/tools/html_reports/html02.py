@@ -184,7 +184,7 @@ def prepare_dataset_events_analysis(event_dict, df_events, strategy: str = "both
     dt_summary_transitions = (
         pd.DataFrame(dt_rows_transitions).set_index("measure")
         if dt_rows_transitions else
-        pd.DataFrame(columns=["n_events","mean_dt","median_dt","p95_dt","min_dt","max_dt"]).set_index("measure")
+        pd.DataFrame(columns=["measure", "n_events", "mean_dt", "median_dt", "p95_dt", "min_dt", "max_dt"]).set_index("measure")
     )
 
     # ============================================================

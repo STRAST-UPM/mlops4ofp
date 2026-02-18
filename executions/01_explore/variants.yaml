@@ -1,0 +1,7 @@
+variants:
+  v100:
+    created_at: '2026-02-18T13:51:20.303479+00:00'
+    params_path: /Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v100/params.yaml
+  v101:
+    created_at: '2026-02-18T13:48:04.457645+00:00'
+    params_path: /Users/juancarlosduenaslopez/Documents/mlops/mlops4ofp/executions/01_explore/v101/params.yaml

@@ -100,6 +100,12 @@ def validate_params(phase: str, params: dict, project_root: Path):
     if not isinstance(phase_rules, dict):
         raise RuntimeError(f"param_rules[{phase}] debe ser un diccionario")
 
+    # Compatibilidad F01: permitir max_line como alias y normalizar a max_lines
+    if phase == "01_explore":
+        if "max_line" in params and "max_lines" not in params:
+            params["max_lines"] = params["max_line"]
+        params.pop("max_line", None)
+
     # Claves meta (no corresponden a parámetros, p.ej. _free_keys)
     free_keys = set(phase_rules.get("_free_keys", []))
 
@@ -508,6 +514,12 @@ class ParamsManager:
             extra_dict = self._parse_extra_params(extra_params)
             for k, v in extra_dict.items():
                 base_params[k] = v
+
+        # Compatibilidad F01: si llega max_line, persistir como max_lines
+        if self.phase == "01_explore":
+            if "max_line" in base_params and "max_lines" not in base_params:
+                base_params["max_lines"] = base_params["max_line"]
+            base_params.pop("max_line", None)
 
         # ---------------------------------------------------------
         # Validar parámetros antes de crear la variante

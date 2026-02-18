@@ -65,11 +65,11 @@ def compute_percentage_distribution_fast(
     if not valid.any():
         return None
 
-    # normalizar a 0..100 (para columnas inválidas dejamos NaN)
-    # norm = (X - vmin)/(vmax-vmin)*100
-    norm = (X - vmin) / span * 100.0
-    # norm tendrá nan donde X era nan o span era 0 (div by 0 -> inf/nan); lo controlamos:
-    norm[:, ~valid] = np.nan
+    # normalizar a 0..100 evitando divisiones inválidas en columnas no válidas
+    norm = np.full_like(X, np.nan, dtype=np.float64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        np.divide(X - vmin, span, out=norm, where=valid[np.newaxis, :])
+    norm *= 100.0
 
     # binning: queremos intervalos tipo pd.cut con right=True sobre bins [0..100]
     # Para right=True, digitize con right=True encaja bien.
