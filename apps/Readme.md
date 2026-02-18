@@ -68,3 +68,13 @@ Todas las busquedas realizadas se pueden consultar en el directorio `apps/window
 
 
 ---
+
+## Debug
+1. Aplicación Temporal 
+```bash 
+docker logs mds_temporal -f
+```
+2. Aplicación analizador de ventanas
+```bash 
+docker logs mds_windows -f
+```
