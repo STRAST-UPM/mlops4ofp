@@ -74,11 +74,11 @@ param_rules:
       required: true
 
     max_lines:
-      type: integer
+      type: number
       required: false
 
     first_line:
-      type: integer
+      type: number
       required: false
 
 
