@@ -321,7 +321,7 @@ def main():
     CONFIG_FILE.write_text(yaml.dump(cfg))
     ensure_minimal_executions_structure()
 
-    print("\n✔ Setup completado correctamente")
+    print("\n[OK] Setup completado correctamente")
     print("Ejecuta ahora: make check-setup")
 
 

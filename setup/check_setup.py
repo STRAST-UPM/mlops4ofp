@@ -177,7 +177,7 @@ def main():
     check_mlflow(cfg)
     check_tensorflow_runtime()
 
-    print("\n✔ Setup verificado correctamente")
+    print("\n[OK] Setup verificado correctamente")
 
 
 if __name__ == "__main__":
