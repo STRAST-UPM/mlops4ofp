@@ -14,12 +14,11 @@ services:
       EXPLORE_STAGE: "01_explore"
       EVENTS_STAGE: "02_prepareeventsds"
       OUTPUT_CONTROL: "/app/control.yml"
-      DEFAULT_DATASET: "MDS-Complete-v003"
+      DEFAULT_DATASET: "MDS-Complete-${VARIANT:-v001}"
       TIMESTAMP_COL: "segs"
-      # EPOCH_EVENT_COLS: "event,event_id,evt,code,codigo_evento,event_code,events"
       EPOCH_EVENT_COLS: '["event","event_id","evt","code","codigo_evento","event_code","events"]'
       CONTROL_DATASET_FILE: "control_dataset.yml"
-      EPOCH_MODE: "true"
+      EPOCH_MODE: "${EPOCH_MODE:-false}"
       EPOCH_PROCESSED_DIR: "/app/epoch_processed"
     deploy:
       resources:

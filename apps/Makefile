@@ -3,9 +3,11 @@
 # ######################################################################## #
 .PHONY: run_temporal_app stop_temporal_app temporal_app_refress_inputDataset check_control_yaml
 CONTAINER_TEMPORALL_APP_NAME = mds_temporal
+DEFAULT_DATASET ?= $(df)
+EPOCH_MODE ?= $(em)
 
 run_temporal_app:
-	@cd temporal_app && docker compose up -d
+	@cd temporal_app && VARIANT=$(DEFAULT_DATASET) EPOCH_MODE=$(EPOCH_MODE) docker compose -f docker-compose.yml up -d
 
 stop_temporal_app:
 	@cd temporal_app && docker compose down
@@ -23,7 +25,6 @@ check_control_yaml:
 # ######################################################################## #
 .PHONY: run_windows_app stop_windows_app
 
-# WINDOWS_VERSION ?= $(if $(ws),$(ws),v001)
 WINDOWS_VERSION ?= $(ws)
 
 run_windows_app:

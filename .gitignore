@@ -35,6 +35,7 @@ executions/*/v*/**/*.json
 executions/*/v*/**/*.html
 executions/*/v*/**/figures/
 executions/*/v*/**/reports/
+.executions
 
 # ⚠️ PERMITIR ARCHIVOS .dvc (son ligeros y necesarios)
 !executions/*/v*/*.dvc
