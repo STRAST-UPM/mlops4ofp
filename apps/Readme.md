@@ -49,7 +49,8 @@ apps/temporal_app/epoch_processed
 ```
 
 De esta forma, cuando se vuelva a cargar el mismo dataset, no será necesario reprocesarlo.
-> [!INFO]
+
+> [!NOTE]
 > Para que la visualización funcione correctamente, es necesario seleccionar tanto las medidas del evento del componente `from_to` (salto del evento) como las del componente al que hace referencia, para que el cambio de evento pueda mostrarse correctamente.
 
 ---
