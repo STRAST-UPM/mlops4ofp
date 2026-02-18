@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -60,6 +61,16 @@ def ensure_clean_dir(path: Path):
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
+
+
+def to_json_safe_window(window):
+    if hasattr(window, "tolist"):
+        return window.tolist()
+    if isinstance(window, (list, tuple)):
+        return list(window)
+    if hasattr(window, "item"):
+        return [window.item()]
+    return [window]
 
 
 def load_manifest(variant_root: Path):
@@ -226,7 +237,8 @@ def run_server(variant: str):
             max_len = config["max_len"]
             X = np.zeros((1, max_len), dtype=np.int32)
             seq = seq[-max_len:]
-            X[0, -len(seq):] = seq
+            if len(seq) > 0:
+                X[0, -len(seq):] = seq
             return X
 
         raise ValueError("Vectorization no soportada")
@@ -297,6 +309,11 @@ def run_server(variant: str):
             return jsonify({"status": "shutting_down"})
         return jsonify({"status": "unknown_command"})
 
+    @app.errorhandler(Exception)
+    def handle_server_exception(err):
+        tb = traceback.format_exc()
+        return jsonify({"error": str(err), "traceback": tb}), 500
+
     host = "127.0.0.1"
     port = 5005
     app.run(host=host, port=port)
@@ -337,103 +354,151 @@ def run_orchestrator(variant: str):
     ensure_clean_dir(report_dir)
     figures_dir.mkdir(parents=True, exist_ok=True)
 
+    server_log_path = runtime_dir / "server.log"
+    server_log_file = open(server_log_path, "w", encoding="utf-8")
+
     # Iniciar servidor
     server_proc = subprocess.Popen(
         [sys.executable, __file__, "--variant", variant, "--mode", "server"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stdout=server_log_file,
+        stderr=server_log_file
     )
+
+    time.sleep(0.5)
+    if server_proc.poll() is not None:
+        server_log_file.flush()
+        startup_log = ""
+        if server_log_path.exists():
+            startup_log = server_log_path.read_text(encoding="utf-8")[:1000]
+        server_log_file.close()
+        raise RuntimeError(
+            "No se pudo arrancar el servidor F07. "
+            f"Revisa {server_log_path}. Log inicial: {startup_log}"
+        )
     
     # Esperar a que el servidor esté listo (healthcheck)
-    import time
     max_retries = 20
     for attempt in range(max_retries):
         try:
             resp = requests.get("http://127.0.0.1:5005/", timeout=0.5)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Healthcheck HTTP {resp.status_code}")
             break
-        except:
+        except Exception:
             if attempt == max_retries - 1:
                 server_proc.kill()
+                server_log_file.close()
                 raise RuntimeError("Servidor Flask no respondió después de 10s")
             time.sleep(0.5)
 
     raw_rows = []
 
-    for dataset in manifest["datasets"]:
-        df = pd.read_parquet(dataset["dataset_path"])
-        
-        # Aplicar límite de muestra si está definido
-        if sample_size is not None:
-            print(f"[INFO] Limitando dataset a {sample_size} filas (de {len(df)} totales)")
-            df = df.head(sample_size)
-        else:
-            print(f"[INFO] Procesando {len(df)} ventanas completas")
-
-        windows_buffer = []
-
-    for idx, row in df.iterrows():
-
-        window = row[dataset["x_column"]]
-
-        if hasattr(window, 'tolist'):
-            window = window.tolist()
-        elif not isinstance(window, list):
-            window = list(window)
-
-        windows_buffer.append(window)
-
-        if len(windows_buffer) == batch_size:
-
-            resp = requests.post(
-                "http://127.0.0.1:5005/infer_batch",
-                json={"windows": windows_buffer}
-            )
-
-            data = resp.json()
-
-            for item in data["results"]:
-                window_json = json.dumps(item["window"])
-                for r in item["results"]:
-                    raw_rows.append({
-                        "window": window_json,
-                        "prediction_name": r["prediction_name"],
-                        "y_pred": r["y_pred"]
-                    })
+    try:
+        for dataset_idx, dataset in enumerate(manifest["datasets"], start=1):
+            df = pd.read_parquet(dataset["dataset_path"])
+            total_rows = len(df)
+            x_column = dataset["x_column"]
+            dataset_name = Path(dataset["dataset_path"]).name
+            
+            # Aplicar límite de muestra si está definido
+            if sample_size is not None:
+                print(
+                    f"[INFO] Dataset {dataset_idx}/{len(manifest['datasets'])} {dataset_name}: "
+                    f"limitando a {sample_size} filas (de {total_rows} totales)"
+                )
+                df = df.head(sample_size)
+            else:
+                print(
+                    f"[INFO] Dataset {dataset_idx}/{len(manifest['datasets'])} {dataset_name}: "
+                    f"procesando {total_rows} ventanas completas"
+                )
 
             windows_buffer = []
+            dataset_processed = 0
 
-    # Procesar último bloque
-    if windows_buffer:
+            for idx, row in df.iterrows():
 
-        resp = requests.post(
-            "http://127.0.0.1:5005/infer_batch",
-            json={"windows": windows_buffer}
-        )
+                window = to_json_safe_window(row[x_column])
+                windows_buffer.append(window)
+                dataset_processed += 1
 
-        data = resp.json()
+                if len(windows_buffer) == batch_size:
 
-        for item in data["results"]:
-            window_json = json.dumps(item["window"])
-            for r in item["results"]:
-                raw_rows.append({
-                    "window": window_json,
-                    "prediction_name": r["prediction_name"],
-                    "y_pred": r["y_pred"]
-                })
+                    resp = requests.post(
+                        "http://127.0.0.1:5005/infer_batch",
+                        json={"windows": windows_buffer},
+                        timeout=60,
+                    )
+                    if resp.status_code >= 400:
+                        error_body = resp.text[:500]
+                        raise RuntimeError(
+                            f"infer_batch devolvió HTTP {resp.status_code}. Body: {error_body}. "
+                            f"Revisa logs en {server_log_path}"
+                        )
+
+                    data = resp.json()
+
+                    for item in data["results"]:
+                        window_json = json.dumps(item["window"], separators=(",", ":"), ensure_ascii=False)
+                        for r in item["results"]:
+                            raw_rows.append({
+                                "window": window_json,
+                                "prediction_name": r["prediction_name"],
+                                "y_pred": r["y_pred"]
+                            })
+
+                    if dataset_processed % (batch_size * 10) == 0 or dataset_processed == len(df):
+                        print(
+                            f"[RUN] {dataset_name}: enviadas {dataset_processed}/{len(df)} "
+                            f"ventanas ({(dataset_processed / len(df) * 100):.1f}%)"
+                        )
+
+                    windows_buffer = []
+
+            # Procesar último bloque
+            if windows_buffer:
+
+                resp = requests.post(
+                    "http://127.0.0.1:5005/infer_batch",
+                    json={"windows": windows_buffer},
+                    timeout=60,
+                )
+                if resp.status_code >= 400:
+                    error_body = resp.text[:500]
+                    raise RuntimeError(
+                        f"infer_batch devolvió HTTP {resp.status_code}. Body: {error_body}. "
+                        f"Revisa logs en {server_log_path}"
+                    )
+
+                data = resp.json()
+
+                for item in data["results"]:
+                    window_json = json.dumps(item["window"], separators=(",", ":"), ensure_ascii=False)
+                    for r in item["results"]:
+                        raw_rows.append({
+                            "window": window_json,
+                            "prediction_name": r["prediction_name"],
+                            "y_pred": r["y_pred"]
+                        })
+
+            print(
+                f"[RUN] {dataset_name}: completado {dataset_processed}/{len(df)} ventanas"
+            )
 
 
-    raw_df = pd.DataFrame(raw_rows)
-    raw_df.to_parquet(logs_dir / "raw_predictions.parquet", index=False)
-    raw_df.to_csv(logs_dir / "raw_predictions.csv", index=False)
-    
-    print(f"[OK] {len(raw_df)} predicciones guardadas")
-
-    # Terminar servidor
-    server_proc.terminate()
-    try:
-        server_proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        server_proc.kill()
+        raw_df = pd.DataFrame(raw_rows)
+        raw_df.to_parquet(logs_dir / "raw_predictions.parquet", index=False)
+        raw_df.to_csv(logs_dir / "raw_predictions.csv", index=False)
+        
+        print(f"[OK] {len(raw_df)} predicciones guardadas")
+    finally:
+        # Terminar servidor
+        server_proc.terminate()
+        try:
+            server_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            server_proc.kill()
+        server_log_file.close()
 
     # ------------------------------------------------------------
     # Postprocess métricas
@@ -460,20 +525,18 @@ def run_orchestrator(variant: str):
         
         print(f"[INFO] Calculando métricas para {pred_name} ({len(df)} ventanas)...")
 
+        progress_every = max(1000, len(df) // 20) if len(df) > 0 else 1000
+
         for idx, row in df.iterrows():
-            if idx % 10 == 0:
-                print(f"[METRICS] Procesadas {idx}/{len(df)} ventanas para métricas...")
+            if idx % progress_every == 0:
+                print(
+                    f"[METRICS] {pred_name}: procesadas {idx}/{len(df)} "
+                    f"ventanas ({(idx / len(df) * 100):.1f}%)"
+                )
             
-            window_raw = row["OW_events"]
-            # Convertir a lista si es ndarray
-            if hasattr(window_raw, 'tolist'):
-                window_list = window_raw.tolist()
-            elif not isinstance(window_raw, list):
-                window_list = list(window_raw)
-            else:
-                window_list = window_raw
+            window_list = to_json_safe_window(row["OW_events"])
             
-            window = json.dumps(window_list)
+            window = json.dumps(window_list, separators=(",", ":"), ensure_ascii=False)
             y_true = row["label"]
 
             match = model_log[model_log["window"] == window]
@@ -491,6 +554,10 @@ def run_orchestrator(variant: str):
                 fp += 1
             elif y_true == 1 and y_pred == 0:
                 fn += 1
+
+        print(
+            f"[METRICS] {pred_name}: completadas {len(df)}/{len(df)} ventanas"
+        )
 
         precision = tp / (tp + fp) if (tp + fp) else 0
         recall = tp / (tp + fn) if (tp + fn) else 0
