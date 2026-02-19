@@ -1,0 +1,5 @@
+parent_variant_f06: v601
+runtime:
+  host: 127.0.0.1
+  port: 5005
+batch_size: 512
