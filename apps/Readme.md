@@ -16,7 +16,7 @@ make run_temporal_app
 ```
 Si quieres utilizar otro dataset por defecto, puedes indicarlo mediante el siguiente comando. En este caso, `v002` hace referencia a un dataset procesado en el directorio `executions/01_explore`:
 ```bash
-make run_temporal_app df=v002
+make run_temporal_app VARIANT=v002
 ```
 > [!WARNING]
 > Si el dataset configurado por defecto no existe, la aplicación no funcionará y se producirán errores al no poder encontrarlo.
@@ -29,7 +29,7 @@ make stop_temporal_app
 ### 2. Modo salto de evento
 Para arrancar la aplicación en modo **salto de evento**, es necesario iniciarla de la siguiente manera:
 ```bash
-make run_temporal_app df=v002 em=true
+make run_temporal_app VARIANT=v002 EPOCH_MODE=true
 ```
 Una vez iniciada, en la esquina superior derecha se podrá cambiar el dataset. Existen dos tipos de datasets disponibles:
 
@@ -59,7 +59,7 @@ De esta forma, cuando se vuelva a cargar el mismo dataset, no será necesario re
 
 Para arrancar la aplicación es necesario seleccionar el dataset de ventanas a analizar, ubicado en el directorio `executions/03_preparewindowsds`. En este ejemplo, se utiliza el dataset **v001**:
 ```bash 
-make run_windows_app ws=v001
+make run_windows_app VARIANT=v001
 ```
 Para detener la aplicación, basta con ejecutar:
 ```bash 
