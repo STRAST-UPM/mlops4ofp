@@ -344,38 +344,35 @@ def main(variant: str):
     print(f"[OK] {len(selected_models)} modelos copiados")
 
     # --------------------------------------------------
-    # Metadata F06
+    # Metadata F06 + Trazabilidad (ESCRITURA ÚNICA)
     # --------------------------------------------------
-    metadata = {
-        "phase": PHASE,
-        "variant": variant,
-        "git_commit": get_git_hash(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+
+    metadata_path = variant_root / f"{PHASE}_metadata.json"
+
+    enriched_params = {
+        **params,
         "temporal": resolved_temporal,
-        "lineage": {k: sorted(v) for k, v in lineage.items()},
         "models": selected_models,
         "objectives": list(objectives.keys()),
         "datasets": dataset_paths,
     }
 
-    metadata_path = variant_root / f"{PHASE}_metadata.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-    # --------------------------------------------------
-    # Trazabilidad
-    # --------------------------------------------------
     write_metadata(
         stage=PHASE,
         variant=variant,
         parent_variant=None,
         parent_variants=parent_variants_f05,
         inputs=dataset_paths,
-        outputs=[str(models_dir), str(datasets_dir), str(objectives_path)],
-        params=params,
+        outputs=[
+            str(models_dir),
+            str(datasets_dir),
+            str(objectives_path),
+        ],
+        params=enriched_params,
         metadata_path=metadata_path,
     )
 
-    print("[OK] Metadata de trazabilidad guardada")
+    print("[OK] Metadata completa guardada (incluye models)")
     print(f"[DONE] F06 completada en {perf_counter() - t_start:.1f}s")
 
 
