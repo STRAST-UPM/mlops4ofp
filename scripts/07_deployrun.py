@@ -98,7 +98,7 @@ def prepare_variant(variant: str):
     datasets = []
     seen_datasets = set()
 
-    for m in f06_metadata["models"]:
+    for m in f06_metadata["params"]["models"]:
         pred_name = m["prediction_name"]
         v05 = m["source_f05"]
 
