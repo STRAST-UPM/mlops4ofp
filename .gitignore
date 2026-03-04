@@ -56,3 +56,10 @@ setup/gdrive-credentials.json
 *.key
 *.pem
 *.p12
+
+
+# Apps
+apps/windows_app/files_output/epoch_processed
+apps/windows_app/files_output/queries
+apps/temporal_app/epoch_processed
+pipeline_lineage.html

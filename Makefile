@@ -140,6 +140,8 @@ variant-generic: check-variant-format
 	@echo "==> Creando variante $(PHASE):$(VARIANT)"
 	@$(PYTHON) mlops4ofp/tools/params_manager.py create-variant --phase $(PHASE) --variant $(VARIANT) $(if $(RAW),--raw $(RAW)) $(EXTRA_SET_FLAGS)
 	@echo "==> Variante creada: $(PHASE):$(VARIANT)"
+	@echo "==> Regenerando dashboard de linaje"
+	@$(MAKE) generate_lineage || true
 
 publish-generic: check-variant-format
 	@echo "==> Validando variante $(PHASE):$(VARIANT)"
@@ -215,6 +217,9 @@ remove-generic: check-variant-format
 	@$(DVC) push -r storage || echo "[WARN] dvc push failed"
 
 	@echo "[OK] Variante $(PHASE):$(VARIANT) eliminada completamente."
+
+	@echo "==> Regenerando dashboard de linaje"
+	@$(MAKE) generate_lineage || true
 
 check-results-generic: check-variant-format
 	@test -n "$(PHASE)" || (echo "[ERROR] PHASE no definido"; exit 1)
@@ -1430,6 +1435,9 @@ help7:
 ############################################
 # UI unificada (portable)
 ############################################
+generate_lineage: 
+	${PYTHON} mlops4ofp/tools/variants_lineage/generate_lineage.py 
+
 
 ui:
 	@echo "==> UI MLOps4OFP"
@@ -1493,4 +1501,4 @@ help: help-setup help1 help2 help3 help4 help5 help6 help7
 	tag1-stage-ready tag1-script-ready tag1-stable tag2-stage-ready tag2-script-ready tag2-stable tag3-stage-ready tag3-script-ready tag3-stable \
 	help1 help2 help3 help4 help \
 	advise4 \
-	switch-remote-local switch-remote-public switch-remote-private check-remotes
+	switch-remote-local switch-remote-public switch-remote-private check-remotes generate_lineage
