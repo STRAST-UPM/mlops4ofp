@@ -31,7 +31,8 @@ def build_html_dashboard():
                 node_id = f"{phase_name}_{variant_id}"
                 
                 card_style = f"background-color: {colors['bg']}; border-color: {colors['border']}; color: {colors['text']};"
-                column_html += f'<div class="variant-card" id="{node_id}" style="{card_style}" onclick="showConfig(\'{node_id}\')">{variant_id}</div>'
+                # Añadidos eventos onmouseenter y onmouseleave
+                column_html += f'<div class="variant-card" id="{node_id}" style="{card_style}" onclick="showConfig(\'{node_id}\')" onmouseenter="highlightLines(\'{node_id}\')" onmouseleave="resetLines()">{variant_id}</div>'
                 
                 params_path = os.path.join(BASE_DIR, phase_name, variant_id, "params.yaml")
                 params = load_yaml(params_path)
@@ -49,6 +50,7 @@ def build_html_dashboard():
                     for p in parents:
                         parent_node_id = f"{prev_phase_name}_{p}"
                         
+                        # Guardamos el objeto línea junto con su origen y destino
                         edges_js.append(f"""
                             var startNode = document.getElementById('{parent_node_id}');
                             var endNode = document.getElementById('{node_id}');
@@ -60,7 +62,11 @@ def build_html_dashboard():
                                     startSocket: 'right', 
                                     endSocket: 'left'
                                 }});
-                                lines.push(line);
+                                lines.push({{
+                                    obj: line,
+                                    source: '{parent_node_id}',
+                                    target: '{node_id}'
+                                }});
                             }}
                         """)
         
@@ -101,6 +107,26 @@ def build_html_dashboard():
                 document.getElementById('config-panel').classList.remove('open');
             }}
 
+            // Función para resaltar líneas conectadas al nodo
+            function highlightLines(nodeId) {{
+                lines.forEach(function(l) {{
+                    if (l.source === nodeId || l.target === nodeId) {{
+                        l.obj.color = '#ff5722'; // Naranja para resaltar
+                        l.obj.size = 4;          // Más gruesa
+                    }} else {{
+                        l.obj.color = 'rgba(173, 181, 189, 0.1)'; // Transparente para ocultar
+                    }}
+                }});
+            }}
+
+            // Función para volver al estado original
+            function resetLines() {{
+                lines.forEach(function(l) {{
+                    l.obj.color = '#adb5bd';
+                    l.obj.size = 2;
+                }});
+            }}
+
             window.addEventListener('load', function() {{
                 // Le damos 150ms al navegador para que dibuje el layout completo antes de trazar las líneas
                 setTimeout(function() {{
@@ -111,15 +137,15 @@ def build_html_dashboard():
             // Listener de scroll ajustado usando requestAnimationFrame para mayor rendimiento
             document.getElementById('pipeline-container').addEventListener('scroll', function() {{
                 window.requestAnimationFrame(function() {{
-                    lines.forEach(function(line) {{
-                        line.position();
+                    lines.forEach(function(l) {{
+                        l.obj.position(); // Actualizado para llamar a .obj
                     }});
                 }});
             }});
 
             window.addEventListener('resize', function() {{
-                lines.forEach(function(line) {{
-                    line.position();
+                lines.forEach(function(l) {{
+                    l.obj.position(); // Actualizado para llamar a .obj
                 }});
             }});
         </script>
