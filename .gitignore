@@ -12,7 +12,10 @@
 /.dvc/tmp/
 
 # === RAW DATA (controlado SOLO por DVC) ===
-data/
+# Ignorar datos crudos, pero permitir punteros .dvc dentro de data/
+data/*
+!data/*.dvc
+!data/.gitignore
 
 # entorno
 .venv/
