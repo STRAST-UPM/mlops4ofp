@@ -1,0 +1,21 @@
+
+auth:
+  dagshub_token_env: DAGSHUB_TOKEN
+  dagshub_user_env: DAGSHUB_USER
+dvc:
+  backend: dagshub
+  repo: Tehedor/my-first-repo
+  storage:
+    type: dagshub
+    url: dagshub://Tehedor/my-first-repo
+git:
+  mode: custom
+  publish_remote_name: publish
+  remote_url: git@github.com:STRAST-UPM/mlops4ofp.git
+mlflow:
+  backend: dagshub
+  enabled: true
+  tracking_uri: https://dagshub.com/Tehedor/my-first-repo.mlflow
+notes: "- Reemplace `grupoXX` por su organizaci\xF3n/usuario.\n- Exporte `DAGSHUB_USER`\
+  \ y `DAGSHUB_TOKEN` en su entorno (o configure en CI).\n- Tras editar, ejecute:\
+  \ `make setup SETUP_CFG=setup/remote.yaml` y `make check-setup`.\n"

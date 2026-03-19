@@ -13,6 +13,61 @@ CONFIG_DIR = ROOT / ".mlops4ofp"
 CONFIG_FILE = CONFIG_DIR / "setup.yaml"
 
 
+def parse_dagshub_repo(url):
+    if not url:
+        return None
+    prefix = "dagshub://"
+    if not url.startswith(prefix):
+        return None
+    value = url[len(prefix):].strip().strip("/")
+    return value or None
+
+
+def normalize_config(cfg):
+    cfg = dict(cfg or {})
+
+    git_cfg = dict(cfg.get("git", {}))
+    if git_cfg.get("mode") is None:
+        git_cfg["mode"] = "custom" if git_cfg.get("remote_url") else "none"
+    git_cfg.setdefault("publish_remote_name", "publish")
+    cfg["git"] = git_cfg
+
+    dvc_cfg = dict(cfg.get("dvc", {}))
+    storage = dvc_cfg.get("storage") if isinstance(dvc_cfg.get("storage"), dict) else {}
+    backend = dvc_cfg.get("backend")
+
+    if backend is None:
+        if storage.get("type") == "dagshub" or parse_dagshub_repo(storage.get("url")):
+            backend = "dagshub"
+        elif dvc_cfg.get("path") or (isinstance(storage.get("url"), str) and storage.get("url").startswith("file://")):
+            backend = "local"
+
+    if backend == "dagshub" and not dvc_cfg.get("repo"):
+        repo = parse_dagshub_repo(storage.get("url"))
+        if repo:
+            dvc_cfg["repo"] = repo
+
+    if backend == "local" and not dvc_cfg.get("path"):
+        storage_url = storage.get("url")
+        if isinstance(storage_url, str) and storage_url.startswith("file://"):
+            dvc_cfg["path"] = storage_url[len("file://"):]
+
+    if backend is not None:
+        dvc_cfg["backend"] = backend
+    cfg["dvc"] = dvc_cfg
+
+    ml_cfg = dict(cfg.get("mlflow", {}))
+    if ml_cfg.get("enabled") is None:
+        ml_cfg["enabled"] = bool(ml_cfg.get("tracking_uri"))
+    if ml_cfg.get("backend") is None:
+        tracking_uri = ml_cfg.get("tracking_uri", "")
+        if isinstance(tracking_uri, str) and tracking_uri:
+            ml_cfg["backend"] = "dagshub" if "dagshub.com" in tracking_uri else "local"
+    cfg["mlflow"] = ml_cfg
+
+    return cfg
+
+
 # ============================================================
 # UTILIDADES
 # ============================================================
@@ -132,8 +187,12 @@ def ensure_running_in_venv(config_path):
 def setup_git(cfg):
 
     git_cfg = cfg.get("git", {})
-    mode = git_cfg.get("mode", "none")
+    mode = git_cfg.get("mode")
     remote_url = git_cfg.get("remote_url")
+    publish_remote_name = git_cfg.get("publish_remote_name", "publish")
+
+    if mode is None:
+        mode = "custom" if remote_url else "none"
 
     # Si no existe repo → crear
     if not (ROOT / ".git").exists():
@@ -149,18 +208,18 @@ def setup_git(cfg):
             abort("git.remote_url obligatorio en modo custom")
 
         existing = subprocess.run(
-            ["git", "remote", "get-url", "publish"],
+            ["git", "remote", "get-url", publish_remote_name],
             cwd=ROOT,
             capture_output=True,
             text=True,
         )
 
         if existing.returncode == 0:
-            print("[INFO] Actualizando remote 'publish'")
-            run(["git", "remote", "set-url", "publish", remote_url])
+            print(f"[INFO] Actualizando remote '{publish_remote_name}'")
+            run(["git", "remote", "set-url", publish_remote_name, remote_url])
         else:
-            print("[INFO] Añadiendo remote 'publish'")
-            run(["git", "remote", "add", "publish", remote_url])
+            print(f"[INFO] Añadiendo remote '{publish_remote_name}'")
+            run(["git", "remote", "add", publish_remote_name, remote_url])
 
 
 # ============================================================
@@ -195,16 +254,29 @@ def setup_dvc(cfg):
     dvc_cfg = cfg.get("dvc", {})
     backend = dvc_cfg.get("backend")
 
+    legacy_storage = dvc_cfg.get("storage", {}) if isinstance(dvc_cfg.get("storage"), dict) else {}
+    legacy_storage_type = legacy_storage.get("type")
+    legacy_storage_url = legacy_storage.get("url")
+
+    if backend is None:
+        if legacy_storage_type == "dagshub" or parse_dagshub_repo(legacy_storage_url):
+            backend = "dagshub"
+        elif dvc_cfg.get("path") or (legacy_storage_url and legacy_storage_url.startswith("file://")):
+            backend = "local"
+
     if backend == "local":
 
-        path = ROOT / dvc_cfg.get("path", ".dvc_storage")
+        local_path = dvc_cfg.get("path")
+        if not local_path and legacy_storage_url and legacy_storage_url.startswith("file://"):
+            local_path = legacy_storage_url[len("file://"):]
+        path = ROOT / (local_path or ".dvc_storage")
         path.mkdir(parents=True, exist_ok=True)
 
         add_or_update_dvc_remote(venv_python, "storage", str(path))
 
     elif backend == "dagshub":
 
-        repo = dvc_cfg.get("repo")
+        repo = dvc_cfg.get("repo") or parse_dagshub_repo(legacy_storage_url)
         if not repo:
             abort("dvc.repo obligatorio para backend dagshub")
 
@@ -238,7 +310,11 @@ def setup_mlflow(cfg):
 
     ml = cfg.get("mlflow", {})
 
-    if not ml.get("enabled", False):
+    enabled = ml.get("enabled")
+    if enabled is None:
+        enabled = bool(ml.get("tracking_uri"))
+
+    if not enabled:
         return
 
     tracking_uri = ml.get("tracking_uri")
@@ -311,7 +387,8 @@ def main():
     if not cfg_path.exists():
         abort(f"No existe {cfg_path}")
 
-    cfg = yaml.safe_load(cfg_path.read_text())
+    raw_cfg = yaml.safe_load(cfg_path.read_text())
+    cfg = normalize_config(raw_cfg)
 
     setup_git(cfg)
     setup_dvc(cfg)

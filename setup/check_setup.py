@@ -10,6 +10,16 @@ CFG_FILE = ROOT / ".mlops4ofp" / "setup.yaml"
 ENV_FILE = ROOT / ".mlops4ofp" / "env.sh"
 
 
+def parse_dagshub_repo(url):
+    if not url:
+        return None
+    prefix = "dagshub://"
+    if not url.startswith(prefix):
+        return None
+    value = url[len(prefix):].strip().strip("/")
+    return value or None
+
+
 # --------------------------------------------------
 # Utilidades
 # --------------------------------------------------
@@ -52,7 +62,12 @@ def is_git_repo():
 
 def check_git(cfg):
     git_cfg = cfg.get("git", {})
-    mode = git_cfg.get("mode", "none")
+    mode = git_cfg.get("mode")
+    expected = git_cfg.get("remote_url")
+    publish_remote_name = git_cfg.get("publish_remote_name", "publish")
+
+    if mode is None:
+        mode = "custom" if expected else "none"
 
     if mode == "none":
         ok("Git: no requerido por el setup")
@@ -61,7 +76,6 @@ def check_git(cfg):
     if not is_git_repo():
         fail("Git requerido por el setup, pero este directorio no es un repositorio Git")
 
-    expected = git_cfg.get("remote_url")
     if not expected:
         fail("git.remote_url no definido en setup.yaml")
 
@@ -70,9 +84,9 @@ def check_git(cfg):
         ok("Git: remoto origin correcto")
         return
 
-    publish = run(["git", "remote", "get-url", "publish"], check=False)
+    publish = run(["git", "remote", "get-url", publish_remote_name], check=False)
     if publish == expected:
-        ok("Git: remoto 'publish' correcto (publicaciones irán ahí)")
+        ok(f"Git: remoto '{publish_remote_name}' correcto (publicaciones irán ahí)")
         return
 
     actual = origin if origin else "<none>"
@@ -86,6 +100,13 @@ def check_git(cfg):
 def check_dvc(cfg):
     dvc_cfg = cfg.get("dvc", {})
     backend = dvc_cfg.get("backend")
+    storage_cfg = dvc_cfg.get("storage", {}) if isinstance(dvc_cfg.get("storage"), dict) else {}
+
+    if backend is None:
+        if storage_cfg.get("type") == "dagshub" or parse_dagshub_repo(storage_cfg.get("url")):
+            backend = "dagshub"
+        elif dvc_cfg.get("path") or (isinstance(storage_cfg.get("url"), str) and storage_cfg.get("url").startswith("file://")):
+            backend = "local"
 
     remotes = run(["dvc", "remote", "list"])
     if "storage" not in remotes:
@@ -95,6 +116,10 @@ def check_dvc(cfg):
 
     if backend == "local":
         path = dvc_cfg.get("path")
+        if not path:
+            storage_url = storage_cfg.get("url")
+            if isinstance(storage_url, str) and storage_url.startswith("file://"):
+                path = storage_url[len("file://"):]
         if not path:
             fail("dvc.path no definido en setup.yaml")
 
@@ -107,14 +132,18 @@ def check_dvc(cfg):
         ok("DVC local: ruta accesible y escribible")
 
     elif backend == "dagshub":
-        cfg_local = run(["dvc", "config", "--local", "--list"], check=False)
+        # DVC puede guardar credenciales en .dvc/config (project) o .dvc/config.local.
+        # Leemos ambas ubicaciones para validar de forma robusta.
+        cfg_effective = run(["dvc", "config", "--list"], check=False) or ""
+        cfg_local = run(["dvc", "config", "--local", "--list"], check=False) or ""
+        cfg_combined = "\n".join([cfg_effective, cfg_local]).strip()
 
-        if not cfg_local:
-            fail("No se pudo leer configuración local de DVC")
+        if not cfg_combined:
+            fail("No se pudo leer configuración de DVC")
 
         if (
-            "remote.storage.user" not in cfg_local
-            or "remote.storage.password" not in cfg_local
+            "remote.storage.user" not in cfg_combined
+            or "remote.storage.password" not in cfg_combined
         ):
             fail(
                 "DVC DAGsHub configurado pero faltan credenciales locales.\n"
@@ -128,7 +157,11 @@ def check_dvc(cfg):
 
 def check_mlflow(cfg):
     ml = cfg.get("mlflow", {})
-    if not ml.get("enabled", False):
+    enabled = ml.get("enabled")
+    if enabled is None:
+        enabled = bool(ml.get("tracking_uri"))
+
+    if not enabled:
         ok("MLflow: deshabilitado (según setup)")
         return
 

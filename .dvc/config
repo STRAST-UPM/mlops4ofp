@@ -1,0 +1,7 @@
+[core]
+    remote = storage
+['remote "storage"']
+    url = https://dagshub.com/Tehedor/my-first-repo.dvc
+    auth = basic
+    user = Tehedor
+    password = 4f746d12a6fc6796651678aed5b800e973bf34ea

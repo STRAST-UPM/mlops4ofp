@@ -168,8 +168,9 @@ publish-generic: check-variant-format
 	# Determinamos modo publish
 	@MODE=$$($(PYTHON) -c "import yaml,pathlib;cfg=pathlib.Path('.mlops4ofp/setup.yaml');print('error' if not cfg.exists() else yaml.safe_load(cfg.read_text()).get('git',{}).get('mode','none'))"); \
 	if [ "$$MODE" = "custom" ]; then \
-		echo "[INFO] Remote 'publish' detectado: empujando a publish"; \
-		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+		CURRENT_BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+		echo "[INFO] Remote 'publish' detectado: empujando a publish/$$CURRENT_BRANCH"; \
+		git push publish HEAD:$$CURRENT_BRANCH || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
 		echo "[INFO] Setup en modo git.mode=none: commit local únicamente"; \
 	else \
@@ -206,7 +207,8 @@ remove-generic: check-variant-format
 
 	@MODE=$$($(PYTHON) -c "import yaml,pathlib;cfg=pathlib.Path('.mlops4ofp/setup.yaml');print('error' if not cfg.exists() else yaml.safe_load(cfg.read_text()).get('git',{}).get('mode','none'))"); \
 	if [ "$$MODE" = "custom" ]; then \
-		git push publish HEAD:main || echo "[WARN] git push publish failed"; \
+		CURRENT_BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+		git push publish HEAD:$$CURRENT_BRANCH || echo "[WARN] git push publish failed"; \
 	elif [ "$$MODE" = "none" ]; then \
 		echo "[INFO] Setup en modo git.mode=none: commit local únicamente"; \
 	else \
